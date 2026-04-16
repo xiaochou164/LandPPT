@@ -1299,11 +1299,17 @@ class AIProviderFactory:
             config = ai_config.get_provider_config(provider_name)
 
         # Built-in providers
-        if provider_name not in cls._providers:
-            raise ValueError(f"Unknown provider: {provider_name}")
+        if provider_name in cls._providers:
+            provider_class = cls._providers[provider_name]
+            return provider_class(config)
 
-        provider_class = cls._providers[provider_name]
-        return provider_class(config)
+        # Support for custom providers
+        provider_type = config.get("provider_type", "openai").lower() if config else "openai"
+        if provider_type == "anthropic":
+            return AnthropicProvider(config)
+        else:
+            # Default to OpenAI-compatible protocol
+            return OpenAIProvider(config)
     
     @classmethod
     def get_available_providers(cls) -> List[str]:
@@ -1321,7 +1327,10 @@ class AIProviderManager:
         """Get AI provider instance with caching"""
         if provider_name is None:
             provider_name = ai_config.default_ai_provider
-        if provider_name not in AIProviderFactory._providers:
+        
+        # Check if provider is built-in or custom
+        available_providers = ai_config.get_available_providers()
+        if provider_name not in AIProviderFactory._providers and provider_name not in available_providers:
             logger.warning(f"Unknown provider '{provider_name}', falling back to 'openai'")
             provider_name = "openai"
 

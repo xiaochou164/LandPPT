@@ -47,6 +47,102 @@
             <h3 class="section-heading" style="text-align: center; margin-bottom: 20px;">AI 提供者详情配置</h3>
 
             <div class="card" style="padding: 0; overflow: hidden;">
+                {# Custom Providers Section #}
+                {% if custom_providers %}
+                <div id="custom-providers-header" style="padding: 12px 20px; background: #f5f5f5; border-bottom: 1px solid #eee;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 600; color: #333; font-size: 0.9em;">自定义 AI 提供者</span>
+                        <button onclick="openAddCustomProviderForm()" class="btn btn-primary" style="padding: 5px 14px; font-size: 0.85em;">
+                            <i class="fas fa-plus"></i> 添加自定义提供者
+                        </button>
+                    </div>
+                </div>
+                {% for cp in custom_providers %}
+                <div class="provider-accordion-item" data-provider="{{ cp.name }}"
+                    style="border-bottom: 1px solid #eee;">
+                    <div class="provider-header" onclick="toggleProviderAccordion('{{ cp.name }}')"
+                        style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; cursor: pointer; background: {% if current_provider == cp.name %}#f8f8f8{% else %}#fff{% endif %}; transition: background 0.2s;">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <i class="fas fa-chevron-right provider-chevron" id="chevron_{{ cp.name }}"
+                                style="transition: transform 0.2s; color: #666; font-size: 12px;"></i>
+                            <span style="font-weight: 600; color: #333;">
+                                {{ cp.name }}
+                                <span style="background: #6366f1; color: #fff; padding: 1px 8px; border-radius: 10px; font-size: 0.7em; margin-left: 6px;">
+                                    {{ cp.type|upper }}
+                                </span>
+                            </span>
+                            {% if cp.api_key or cp.base_url %}
+                            <span style="background: #0f0f0f; color: #f8f8f8; padding: 2px 10px; border-radius: 12px; font-size: 0.75em;">已配置</span>
+                            {% else %}
+                            <span style="background: #e5e5e5; color: #666; padding: 2px 10px; border-radius: 12px; font-size: 0.75em;">未配置</span>
+                            {% endif %}
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;" onclick="event.stopPropagation();">
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.9em; color: #555;">
+                                <input type="radio" name="default_provider" value="{{ cp.name }}" {% if current_provider == cp.name %}checked{% endif %}
+                                    onchange="setDefaultProvider('{{ cp.name }}')" style="accent-color: #111;">
+                                默认
+                            </label>
+                            <button onclick="event.stopPropagation(); testCustomProviderConnection('{{ cp.name }}')"
+                                class="btn btn-secondary" style="padding: 5px 12px; font-size: 0.85em;" title="测试连接">
+                                <i class="fas fa-plug"></i>
+                            </button>
+                            <button onclick="event.stopPropagation(); saveCustomProviderConfig('{{ cp.name }}')"
+                                class="btn btn-success" style="padding: 5px 12px; font-size: 0.85em;">保存</button>
+                            <button onclick="event.stopPropagation(); deleteCustomProvider('{{ cp.name }}')"
+                                class="btn btn-danger" style="padding: 5px 12px; font-size: 0.85em; background: #ef4444; border-color: #ef4444;" title="删除">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="provider-content" id="provider_content_{{ cp.name }}"
+                        style="display: none; padding: 16px 20px; background: #fafafa; border-top: 1px solid #eee;">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+                            <div class="form-group" style="margin: 0;">
+                                <label style="font-size: 0.85em; color: #555; margin-bottom: 4px; display: block;">提供者名称</label>
+                                <input type="text" name="custom_name_{{ cp.name }}" id="custom_name_{{ cp.name }}" value="{{ cp.name }}"
+                                    placeholder="如: my-provider"
+                                    style="width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9em;">
+                            </div>
+                            <div class="form-group" style="margin: 0;">
+                                <label style="font-size: 0.85em; color: #555; margin-bottom: 4px; display: block;">API 类型</label>
+                                <select name="custom_type_{{ cp.name }}" id="custom_type_{{ cp.name }}"
+                                    style="width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9em;">
+                                    <option value="openai" {% if cp.type == 'openai' %}selected{% endif %}>OpenAI 兼容</option>
+                                    <option value="anthropic" {% if cp.type == 'anthropic' %}selected{% endif %}>Anthropic 兼容</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin: 0;">
+                                <label style="font-size: 0.85em; color: #555; margin-bottom: 4px; display: block;">Base URL</label>
+                                <input type="text" name="custom_base_url_{{ cp.name }}" id="custom_base_url_{{ cp.name }}" value="{{ cp.base_url }}"
+                                    placeholder="https://api.example.com/v1"
+                                    style="width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9em;">
+                            </div>
+                            <div class="form-group" style="margin: 0;">
+                                <label style="font-size: 0.85em; color: #555; margin-bottom: 4px; display: block;">API Key</label>
+                                <input type="password" name="custom_api_key_{{ cp.name }}" id="custom_api_key_{{ cp.name }}" value="{{ cp.api_key }}"
+                                    placeholder="sk-..."
+                                    style="width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9em;">
+                            </div>
+                            <div class="form-group" style="margin: 0; grid-column: 1 / -1;">
+                                <label style="font-size: 0.85em; color: #555; margin-bottom: 4px; display: block;">默认模型</label>
+                                <input type="text" name="custom_model_{{ cp.name }}" id="custom_model_{{ cp.name }}" value="{{ cp.model }}"
+                                    placeholder="如: gpt-4, claude-3-sonnet"
+                                    style="width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9em;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div id="custom-providers-empty" style="padding: 20px; text-align: center; background: #fafafa; border-bottom: 1px solid #eee;">
+                    <p style="color: #666; margin: 0 0 12px 0; font-size: 0.9em;">暂无非预设 AI 提供者</p>
+                    <button onclick="openAddCustomProviderForm()" class="btn btn-primary" style="padding: 8px 16px; font-size: 0.9em;">
+                        <i class="fas fa-plus"></i> 添加自定义 AI 提供者
+                    </button>
+                </div>
+                {% endif %}
+
                 {% for provider in ["landppt", "openai", "anthropic", "google"] %}
                 <div class="provider-accordion-item" data-provider="{{ provider }}"
                     style="border-bottom: 1px solid #eee;">
@@ -337,11 +433,18 @@
                                             {% if current_config.get(role.provider_field) == "ollama" %}
                                             <option value="ollama" selected hidden>ollama</option>
                                             {% endif %}
+                                            <option value="">默认</option>
+                                            {% if current_config.get(role.provider_field) == "ollama" %}
+                                            <option value="ollama" selected hidden>ollama</option>
+                                            {% endif %}
                                             {% for provider in ["landppt", "openai", "anthropic", "google"] %}
-                                            <option value="{{ provider }}" {% if
-                                                current_config.get(role.provider_field)==provider %}selected{% endif %}>
-                                                {{ provider }}</option>
+                                            <option value="{{ provider }}" {% if current_config.get(role.provider_field) == provider %}selected{% endif %}>{{ provider }}</option>
                                             {% endfor %}
+                                            {% if custom_providers %}
+                                            {% for cp in custom_providers %}
+                                            <option value="{{ cp.name }}" {% if current_config.get(role.provider_field) == cp.name %}selected{% endif %}>{{ cp.name }} (自定义)</option>
+                                            {% endfor %}
+                                            {% endif %}
                                         </select>
                                     </td>
                                     <td style="padding: 8px 16px;">

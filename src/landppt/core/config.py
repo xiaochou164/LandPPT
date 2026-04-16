@@ -113,6 +113,9 @@ class AIConfig(BaseSettings):
     # Provider Selection
     default_ai_provider: str = Field(default="openai", env="DEFAULT_AI_PROVIDER")
     
+    # Custom AI Providers (JSON list of {name, type, base_url, api_key, model})
+    custom_providers: list = Field(default=[], env="CUSTOM_PROVIDERS")
+    
     # Model Role Configuration
     default_model_provider: Optional[str] = Field(default=None, env="DEFAULT_MODEL_PROVIDER")
     default_model_name: Optional[str] = Field(default=None, env="DEFAULT_MODEL_NAME")
@@ -324,11 +327,18 @@ class AIConfig(BaseSettings):
             }
         }
 
+        # Build merged configs (no mutation of original)
+        merged: Dict[str, Dict[str, Any]] = {}
+        for pname, pcfg in configs.items():
+            merged[pname] = dict(pcfg)  # shallow copy to avoid mutation
+        for cname, ccfg in self._get_custom_provider_configs().items():
+            merged[cname] = dict(ccfg)  # shallow copy
+        
         timeout_seconds = resolve_timeout_seconds(self.llm_timeout_seconds, 600)
-        for provider_config in configs.values():
-            provider_config["llm_timeout_seconds"] = timeout_seconds
+        for pcfg in merged.values():
+            pcfg["llm_timeout_seconds"] = timeout_seconds
 
-        return configs.get(provider, configs.get("openai", {}))
+        return merged.get(provider, merged.get("openai", {}))
     
     def is_provider_available(self, provider: str) -> bool:
         """Check if a provider is properly configured"""
@@ -346,8 +356,35 @@ class AIConfig(BaseSettings):
         elif provider == "ollama":
             return self.enable_local_models
 
+        # Check custom providers
+        for cp in self.custom_providers:
+            pname = cp.get("name", "") if isinstance(cp, dict) else ""
+            if pname.lower() == provider.lower():
+                return bool(cp.get("api_key", "") or cp.get("base_url", ""))
+
         return False
     
+    def _get_custom_provider_configs(self) -> Dict[str, Dict[str, Any]]:
+        """Get configurations for all custom providers as a dict keyed by provider name."""
+        from copy import deepcopy
+        configs = {}
+        for cp in self.custom_providers:
+            name = cp.get("name", "") if isinstance(cp, dict) else ""
+            if not name:
+                continue
+            provider_type = cp.get("type", "openai") if isinstance(cp, dict) else "openai"
+            config = {
+                "api_key": cp.get("api_key", "") if isinstance(cp, dict) else "",
+                "base_url": cp.get("base_url", "") if isinstance(cp, dict) else "",
+                "model": cp.get("model", "") if isinstance(cp, dict) else "",
+                "max_tokens": self.max_tokens,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "provider_type": provider_type,
+            }
+            configs[name] = config
+        return configs
+
     def get_available_providers(self) -> list[str]:
         """Get list of available AI providers"""
         providers: list[str] = []
@@ -366,6 +403,13 @@ class AIConfig(BaseSettings):
 
             providers.append(canonical)
             seen.add(canonical)
+
+        # Add custom providers
+        for cp in self.custom_providers:
+            name = cp.get("name", "") if isinstance(cp, dict) else ""
+            if name and name not in seen:
+                providers.append(name)
+                seen.add(name)
 
         return providers
 
@@ -621,6 +665,13 @@ class AppConfig(BaseSettings):
     linuxdo_client_id: Optional[str] = Field(default=None, env="LINUXDO_CLIENT_ID")
     linuxdo_client_secret: Optional[str] = Field(default=None, env="LINUXDO_CLIENT_SECRET")
     linuxdo_callback_url: Optional[str] = Field(default=None, env="LINUXDO_CALLBACK_URL")  # e.g. https://yourdomain.com/auth/linuxdo/callback
+
+    # Authentik OAuth Configuration
+    authentik_oauth_enabled: bool = Field(default=False, env="AUTHENTIK_OAUTH_ENABLED")
+    authentik_client_id: Optional[str] = Field(default=None, env="AUTHENTIK_CLIENT_ID")
+    authentik_client_secret: Optional[str] = Field(default=None, env="AUTHENTIK_CLIENT_SECRET")
+    authentik_callback_url: Optional[str] = Field(default=None, env="AUTHENTIK_CALLBACK_URL")  # e.g. https://yourdomain.com/auth/authentik/callback
+    authentik_issuer_url: Optional[str] = Field(default=None, env="AUTHENTIK_ISSUER_URL")  # e.g. https://auth.example.com
     
     model_config = {
         "case_sensitive": False,
@@ -650,6 +701,7 @@ class AppConfig(BaseSettings):
         "turnstile_enabled",
         "github_oauth_enabled",
         "linuxdo_oauth_enabled",
+        "authentik_oauth_enabled",
         "smtp_use_ssl",
         "enable_user_registration",
         mode="before",

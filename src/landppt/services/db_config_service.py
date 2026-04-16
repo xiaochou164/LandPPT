@@ -64,6 +64,9 @@ class DatabaseConfigService:
             "landppt_base_url": {"type": "url", "category": "ai_providers", "default": "https://api.openai.com/v1", "admin_only": True},
             "landppt_model": {"type": "text", "category": "ai_providers", "default": "MODEL1"},
             
+            # Custom AI Providers - JSON array of {name, type, base_url, api_key, model}
+            "custom_providers": {"type": "text", "category": "ai_providers", "default": "[]"},
+            
             "default_ai_provider": {"type": "select", "category": "ai_providers", "default": "landppt"},
             
             # Model Role Overrides
@@ -163,6 +166,11 @@ class DatabaseConfigService:
             "linuxdo_client_id": {"type": "text", "category": "oauth_settings", "default": "", "admin_only": True},
             "linuxdo_client_secret": {"type": "password", "category": "oauth_settings", "default": "", "admin_only": True},
             "linuxdo_callback_url": {"type": "url", "category": "oauth_settings", "default": "", "admin_only": True},
+            "authentik_oauth_enabled": {"type": "boolean", "category": "oauth_settings", "default": "false", "admin_only": True},
+            "authentik_client_id": {"type": "text", "category": "oauth_settings", "default": "", "admin_only": True},
+            "authentik_client_secret": {"type": "password", "category": "oauth_settings", "default": "", "admin_only": True},
+            "authentik_callback_url": {"type": "url", "category": "oauth_settings", "default": "", "admin_only": True},
+            "authentik_issuer_url": {"type": "url", "category": "oauth_settings", "default": "", "admin_only": True},
 
             # Image Service Configuration
             "enable_image_service": {"type": "boolean", "category": "image_service", "default": "false"},
@@ -704,6 +712,26 @@ def _build_user_ai_provider_config(
         },
     }
     provider_configs["gemini"] = dict(provider_configs["google"])
+
+    # Check if this is a custom provider
+    custom_providers = user_config.get("custom_providers", [])
+    if isinstance(custom_providers, str):
+        try:
+            custom_providers = json.loads(custom_providers)
+        except Exception:
+            custom_providers = []
+
+    if isinstance(custom_providers, list):
+        for cp in custom_providers:
+            if isinstance(cp, dict) and cp.get("name") == resolved_provider:
+                return {
+                    "api_key": cp.get("api_key", ""),
+                    "base_url": cp.get("base_url", ""),
+                    "model": cp.get("model", ""),
+                    "provider_type": cp.get("type", "openai"),
+                    "provider_name": resolved_provider,
+                    "llm_timeout_seconds": user_config.get("llm_timeout_seconds"),
+                }
 
     config = dict(provider_configs.get(resolved_provider, provider_configs["landppt"]))
     config["provider_name"] = resolved_provider

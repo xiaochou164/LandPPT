@@ -2944,3 +2944,158 @@
                 }
             }, 100);
         });
+
+        // ================================================
+        // Custom AI Providers Management
+        // ================================================
+        
+        window.customProviders = {{ custom_providers | tojson }};
+
+        function openAddCustomProviderForm() {
+             let name = prompt("输入自定义提供者名称（如: my-provider）:");
+            if (!name || !name.trim()) return;
+            name = name.trim().toLowerCase().replace(/[^a-z0-9-_]/g, '');
+            if (!name) {
+                alert("无效的名称");
+                return;
+            }
+            const type = prompt("选择 API 类型（输入 openai 或 anthropic，默认 openai）:", "openai");
+            if (!type || !type.trim()) return;
+            const providerType = type.trim().toLowerCase();
+            if (providerType !== 'openai' && providerType !== 'anthropic') {
+                alert("类型必须是 openai 或 anthropic");
+                return;
+            }
+            let customProviders = window.customProviders || [];
+            if (customProviders.some(p => p.name === name)) {
+                alert("提供者 " + name + " 已存在");
+                return;
+            }
+            customProviders.push({ name: name, type: providerType, base_url: '', api_key: '', model: '' });
+            window.customProviders = customProviders;
+            saveCustomProvidersToServer();
+            setTimeout(() => location.reload(), 500);
+        }
+        
+        function saveCustomProvidersToServer() {
+            const data = { config: {} };
+            data.config.custom_providers = JSON.stringify(window.customProviders || []);
+            fetch('/api/config/ai_providers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(r => r.json())
+            .then(resp => {
+                if (!resp.success) {
+                    alert('保存失败: ' + (resp.error || '未知错误'));
+                }
+            })
+            .catch(err => {
+                console.error('Save error:', err);
+                alert('保存失败');
+            });
+        }
+        
+        function saveCustomProviderConfig(name) {
+            const baseUrl = document.getElementById('custom_base_url_' + name);
+            const apiKey = document.getElementById('custom_api_key_' + name);
+            const model = document.getElementById('custom_model_' + name);
+            const typeEl = document.getElementById('custom_type_' + name);
+            const displayName = document.getElementById('custom_name_' + name);
+            
+            const baseUrlVal = baseUrl ? baseUrl.value : '';
+            const apiKeyVal = apiKey ? apiKey.value : '';
+            const modelVal = model ? model.value : '';
+            const typeVal = typeEl ? typeEl.value : 'openai';
+            const nameVal = displayName ? displayName.value : name;
+            
+            let customProviders = window.customProviders || [];
+            
+            if (nameVal !== name) {
+                // Name changed - remove old, add new
+                if (customProviders.some(p => p.name === nameVal)) {
+                    alert("提供者 " + nameVal + " 已存在");
+                    return;
+                }
+                customProviders = customProviders.filter(p => p.name !== name);
+                customProviders.push({ name: nameVal, type: typeVal, base_url: baseUrlVal, api_key: apiKeyVal, model: modelVal });
+            } else {
+                const idx = customProviders.findIndex(p => p.name === name);
+                if (idx >= 0) {
+                    customProviders[idx] = { name: name, type: typeVal, base_url: baseUrlVal, api_key: apiKeyVal, model: modelVal };
+                }
+            }
+            
+            window.customProviders = customProviders;
+            saveCustomProvidersToServer();
+            const radio = document.querySelector('input[name="default_provider"][value="' + name + '"]');
+            if (radio && radio.checked) {
+                setDefaultProvider(name);
+            }
+            setTimeout(() => location.reload(), 500);
+        }
+        
+        function deleteCustomProvider(name) {
+            if (!confirm("确定删除自定义提供者 " + name + "？")) return;
+            let customProviders = window.customProviders || [];
+            customProviders = customProviders.filter(p => p.name !== name);
+            window.customProviders = customProviders;
+            saveCustomProvidersToServer();
+            setTimeout(() => location.reload(), 300);
+        }
+        
+        async function testCustomProviderConnection(name) {
+            const baseUrlEl = document.getElementById('custom_base_url_' + name);
+            const apiKeyEl = document.getElementById('custom_api_key_' + name);
+            const modelEl = document.getElementById('custom_model_' + name);
+            const typeEl = document.getElementById('custom_type_' + name);
+            
+            const apiKey = apiKeyEl ? apiKeyEl.value : '';
+            const baseUrl = baseUrlEl ? baseUrlEl.value : '';
+            const model = modelEl ? modelEl.value : '';
+            const providerType = typeEl ? typeEl.value : 'openai';
+            
+            if (!apiKey) {
+                showNotification("请先填写 API Key", 'error');
+                return;
+            }
+            
+            const btn = event.target.closest('button');
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            btn.disabled = true;
+            
+            showNotification(`正在测试 ${name} 连接...`, 'info');
+            
+            try {
+                const response = await fetch('/api/ai/providers/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        provider: name,
+                        api_key: apiKey,
+                        base_url: baseUrl,
+                        model: model || 'gpt-3.5-turbo',
+                        provider_type: providerType
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    btn.innerHTML = '<i class="fas fa-check" style="color:green"></i>';
+                    showNotification(`${name} ${result.message || '连接成功！'}`, 'success');
+                } else {
+                    btn.innerHTML = '<i class="fas fa-times" style="color:red"></i>';
+                    showNotification(`${name} 连接失败: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                btn.innerHTML = '<i class="fas fa-times" style="color:red"></i>';
+                showNotification(`${name} 连接失败: ${error.message}`, 'error');
+            } finally {
+                setTimeout(() => { btn.innerHTML = originalHTML; btn.disabled = false; }, 2000);
+            }
+        }
+
+

@@ -184,13 +184,23 @@ async def web_ai_config(
         for provider in ["landppt", "openai", "anthropic", "google", "ollama"]
     }
 
+    # Get custom providers
+    custom_providers = current_config.get("custom_providers", [])
+    if isinstance(custom_providers, str):
+        try:
+            import json
+            custom_providers = json.loads(custom_providers)
+        except Exception:
+            custom_providers = []
+    
     return templates.TemplateResponse("pages/settings/ai_config.html", {
         "request": request,
         "current_provider": current_provider,
         "available_providers": ai_config.get_available_providers(),
         "provider_status": provider_status,
         "current_config": current_config,
-        "user": user.to_dict()
+        "user": user.to_dict(),
+        "custom_providers": custom_providers,
     })
 
 
@@ -615,9 +625,29 @@ async def test_provider_connection(
             normalized = str(value or "medium").strip().lower()
             return normalized if normalized in {"none", "minimal", "low", "medium", "high", "xhigh"} else "medium"
 
-        api_key = data.get('api_key') or config.get(f"{provider}_api_key", "")
-        base_url = data.get('base_url') or config.get(f"{provider}_base_url", "")
-        model = data.get('model') or config.get(f"{provider}_model", "")
+        # Check if this is a custom provider
+        custom_provider_type = None
+        custom_providers = config.get("custom_providers", [])
+        if isinstance(custom_providers, str):
+            try:
+                custom_providers = json.loads(custom_providers)
+            except Exception:
+                custom_providers = []
+        
+        if isinstance(custom_providers, list):
+            for cp in custom_providers:
+                if isinstance(cp, dict) and cp.get("name") == provider:
+                    custom_provider_type = cp.get("type", "openai").lower()
+                    api_key = data.get('api_key') or cp.get("api_key", "")
+                    base_url = data.get('base_url') or cp.get("base_url", "")
+                    model = data.get('model') or cp.get("model", "")
+                    break
+        
+        # If not a custom provider, use the standard method
+        if custom_provider_type is None:
+            api_key = data.get('api_key') or config.get(f"{provider}_api_key", "")
+            base_url = data.get('base_url') or config.get(f"{provider}_base_url", "")
+            model = data.get('model') or config.get(f"{provider}_model", "")
         use_responses_api = (
             _coerce_bool(data.get("use_responses_api"))
             if "use_responses_api" in data
@@ -665,6 +695,7 @@ async def test_provider_connection(
 
         async with aiohttp.ClientSession() as session:
             # Google/Gemini 和 Anthropic 不是 OpenAI 兼容协议，必须按原生接口测试。
+            # Custom providers with type "anthropic" also use Anthropic protocol.
             if provider == "google":
                 request_url = build_google_generate_content_url(base_url, model)
                 payload = build_google_test_payload("Hi")
@@ -729,7 +760,9 @@ async def test_provider_connection(
                 )
                 return {"success": False, "error": f"请求失败: {fallback_status or primary_status}"}
 
-            if provider == "anthropic":
+            # Check if provider is Anthropic or a custom Anthropic-compatible provider
+            is_anthropic_provider = provider == "anthropic" or (custom_provider_type == "anthropic" and provider not in ["openai", "anthropic", "google", "landppt", "ollama"])
+            if is_anthropic_provider:
                 request_url = build_anthropic_messages_url(base_url)
                 payload = build_anthropic_test_payload("Hi")
                 payload["model"] = model

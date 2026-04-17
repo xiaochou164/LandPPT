@@ -457,6 +457,21 @@ class ProjectWorkflowStageService:
                 "type_options": type_options
             }
 
+    @staticmethod
+    def _normalize_progress(progress: Any) -> float:
+            """Normalize stage progress to [0, 100] with safe numeric coercion."""
+            try:
+                value = float(progress)
+            except (TypeError, ValueError):
+                return 0.0
+            return max(0.0, min(100.0, value))
+
+    def _calculate_overall_progress(self, stages: List[Any]) -> float:
+            """Calculate overall progress without relying on project manager implementation details."""
+            if not stages:
+                return 0.0
+            return sum(self._normalize_progress(getattr(stage, "progress", 0.0)) for stage in stages) / len(stages)
+
     def _get_default_todo_structure(self, confirmed_requirements: Dict[str, Any]) -> Dict[str, Any]:
             """Get default TODO structure based on confirmed requirements"""
             return {
@@ -515,7 +530,7 @@ class ProjectWorkflowStageService:
                 )
 
                 # Calculate correct overall progress
-                todo_board.overall_progress = self.project_manager.calculate_overall_progress(stages)
+                todo_board.overall_progress = self._calculate_overall_progress(stages)
 
                 # Set current stage index to the first non-completed stage
                 todo_board.current_stage_index = 0
@@ -627,6 +642,14 @@ class ProjectWorkflowStageService:
                 if not project or not project.todo_board:
                     return False
 
+                requested_stage_id = stage_id
+                legacy_ppt_stage_ids = (
+                    "theme_design",
+                    "content_generation",
+                    "layout_verification",
+                    "export_output",
+                )
+
                 # Find the stage index
                 stage_index = -1
                 for i, stage in enumerate(project.todo_board.stages):
@@ -634,8 +657,25 @@ class ProjectWorkflowStageService:
                         stage_index = i
                         break
 
+                # Backward compatibility: legacy workflows may not have "ppt_creation"
+                if stage_index == -1 and requested_stage_id == "ppt_creation":
+                    for legacy_stage_id in legacy_ppt_stage_ids:
+                        for i, stage in enumerate(project.todo_board.stages):
+                            if stage.id == legacy_stage_id:
+                                stage_id = legacy_stage_id
+                                stage_index = i
+                                logger.info(
+                                    "Fallback reset anchor for project %s: requested=%s, using=%s",
+                                    project_id,
+                                    requested_stage_id,
+                                    stage_id,
+                                )
+                                break
+                        if stage_index != -1:
+                            break
+
                 if stage_index == -1:
-                    logger.error(f"Stage {stage_id} not found in project {project_id}")
+                    logger.error(f"Stage {requested_stage_id} not found in project {project_id}")
                     return False
 
                 # Reset all stages from the specified stage onwards
@@ -650,16 +690,23 @@ class ProjectWorkflowStageService:
                 project.todo_board.current_stage_index = stage_index
 
                 # Recalculate overall progress
-                project.todo_board.overall_progress = self.project_manager.calculate_overall_progress(project.todo_board.stages)
+                project.todo_board.overall_progress = self._calculate_overall_progress(project.todo_board.stages)
                 project.todo_board.updated_at = time.time()
 
+                reset_outline = requested_stage_id == "outline_generation" or stage_id == "outline_generation"
+                reset_ppt_only = (
+                    requested_stage_id == "ppt_creation"
+                    or stage_id == "ppt_creation"
+                    or stage_id in legacy_ppt_stage_ids
+                )
+
                 # Clear related project data based on the stage being reset
-                if stage_id == "outline_generation":
+                if reset_outline:
                     # Reset outline and all subsequent data
                     project.outline = None
                     project.slides_html = None
                     project.slides_data = None
-                elif stage_id == "ppt_creation":
+                elif reset_ppt_only:
                     # Reset only PPT data, keep outline
                     project.slides_html = None
                     project.slides_data = None
@@ -686,12 +733,12 @@ class ProjectWorkflowStageService:
                         )
 
                     # 如果重置了大纲生成阶段，清除数据库中的大纲和幻灯片数据
-                    if stage_id == "outline_generation":
+                    if reset_outline:
                         # 清除大纲数据
                         await db_manager.save_project_outline(project_id, None)
                         # 清除幻灯片数据
                         await db_manager.save_project_slides(project_id, "", [])
-                    elif stage_id == "ppt_creation":
+                    elif reset_ppt_only:
                         # 只清除幻灯片数据，保留大纲
                         await db_manager.save_project_slides(project_id, "", [])
 
@@ -701,7 +748,12 @@ class ProjectWorkflowStageService:
                     logger.error(f"Failed to save reset stages to database: {save_error}")
                     # 继续执行，因为内存中的数据已经重置
 
-                logger.info(f"Reset stages from {stage_id} onwards for project {project_id}")
+                logger.info(
+                    "Reset stages from %s onwards for project %s (requested anchor: %s)",
+                    stage_id,
+                    project_id,
+                    requested_stage_id,
+                )
                 return True
 
             except Exception as e:

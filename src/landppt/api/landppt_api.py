@@ -534,6 +534,67 @@ async def continue_from_stage(
         raise HTTPException(status_code=500, detail=f"Error continuing from stage: {str(e)}")
 
 
+@router.post("/projects/{project_id}/restart-ppt-generation")
+@router.post("/projects/{project_id}/restart-ppt-generation-entry", include_in_schema=False)
+async def restart_project_ppt_generation(
+    project_id: str,
+    user: User = Depends(get_current_user_required)
+):
+    """Clear generated PPT data, reset PPT creation stage, and allow template reselection."""
+    try:
+        user_ppt_service = get_ppt_service_for_user(user.id)
+
+        project = await user_ppt_service.project_manager.get_project(project_id, user_id=user.id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        reset_success = await user_ppt_service.reset_stages_from(
+            project_id,
+            "ppt_creation",
+            user_id=user.id,
+        )
+        if not reset_success:
+            raise HTTPException(status_code=400, detail="Failed to reset PPT creation stage")
+
+        metadata = dict(project.project_metadata or {})
+        for key in (
+            "selected_global_template_id",
+            "template_mode",
+            "free_template_html",
+            "free_template_name",
+            "free_template_generated_at",
+            "free_template_prompt",
+            "free_template_error",
+            "free_template_status",
+            "free_template_confirmed",
+            "free_template_confirmed_at",
+        ):
+            metadata.pop(key, None)
+
+        if hasattr(user_ppt_service.project_manager, "update_project_metadata"):
+            await user_ppt_service.project_manager.update_project_metadata(
+                project_id,
+                metadata,
+                user_id=user.id,
+            )
+
+        try:
+            user_ppt_service.clear_cached_style_genes(project_id)
+        except Exception:
+            pass
+
+        return {
+            "status": "success",
+            "message": "PPT生成已重置，请重新选择模板并发起生成",
+            "project_id": project_id,
+            "next_url": f"/projects/{project_id}/template-selection",
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error restarting PPT generation for project_id=%s", project_id)
+        raise HTTPException(status_code=500, detail="Failed to restart PPT generation")
+
 
 @router.post("/projects/{project_id}/slides/{slide_index}/lock")
 async def lock_slide(

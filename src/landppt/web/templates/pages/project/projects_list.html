@@ -578,7 +578,26 @@
                     {% elif project.status == 'in_progress' %}
                         <a href="/projects/{{ project.project_id }}/todo" class="action-btn" title="查看进度">进度</a>
                     {% endif %}
-                    <button onclick="event.stopPropagation(); confirmDeleteProject('{{ project.project_id }}', '{{ project.title }}')" class="action-btn action-btn--danger" title="删除">删除</button>
+                    {% if project.status in ['completed', 'in_progress'] %}
+                    <button
+                        type="button"
+                        class="action-btn js-restart-ppt-btn"
+                        data-action="restart-ppt"
+                        data-project-id="{{ project.project_id }}"
+                        title="一键重新进行PPT生成"
+                    >
+                        重新生成PPT
+                    </button>
+                    {% endif %}
+                    <button
+                        type="button"
+                        class="action-btn action-btn--danger js-delete-project-btn"
+                        data-action="delete-project"
+                        data-project-id="{{ project.project_id }}"
+                        title="删除"
+                    >
+                        删除
+                    </button>
                 </div>
             </div>
             {% endfor %}
@@ -649,7 +668,7 @@
 <div id="loadingOverlay" style="display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.4); backdrop-filter: blur(4px); z-index: 1001; align-items: center; justify-content: center; padding: 24px;">
     <div class="modal-surface" style="max-width: 360px;">
         <div class="spinner" style="margin-bottom: 16px;"></div>
-        <p style="color: var(--text-primary); font-weight: 600; font-size: 0.875rem;">正在删除项目...</p>
+        <p id="loadingOverlayMessage" style="color: var(--text-primary); font-weight: 600; font-size: 0.875rem;">正在删除项目...</p>
     </div>
 </div>
 {% endblock %}
@@ -657,6 +676,24 @@
 {% block extra_js %}
 <script>
 let currentDeleteProjectId = null;
+
+function setLoadingOverlay(message) {
+    const overlay = document.getElementById('loadingOverlay');
+    const messageEl = document.getElementById('loadingOverlayMessage');
+    if (messageEl) {
+        messageEl.textContent = message || '处理中...';
+    }
+    if (overlay) {
+        overlay.style.display = 'flex';
+    }
+}
+
+function hideLoadingOverlay() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) {
+        overlay.style.display = 'none';
+    }
+}
 
 function filterProjects() {
     const selectElement = document.getElementById('statusFilter');
@@ -709,7 +746,7 @@ function closeDeleteModal() {
 async function executeDeleteProject() {
     if (!currentDeleteProjectId) return;
     document.getElementById('deleteModal').style.display = 'none';
-    document.getElementById('loadingOverlay').style.display = 'flex';
+    setLoadingOverlay('正在删除项目...');
     try {
         const response = await fetch(`/api/database/projects/${currentDeleteProjectId}`, {
             method: 'DELETE', headers: { 'Content-Type': 'application/json' }
@@ -721,9 +758,57 @@ async function executeDeleteProject() {
         } else { throw new Error(result.detail || '删除失败'); }
     } catch (error) {
         showNotification('删除失败：' + error.message, 'error');
-        document.getElementById('loadingOverlay').style.display = 'none';
+        hideLoadingOverlay();
     }
     currentDeleteProjectId = null;
+}
+
+async function tryPostJson(url) {
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    });
+
+    let payload = {};
+    try {
+        payload = await response.json();
+    } catch (_) {
+        payload = {};
+    }
+
+    return { response, payload };
+}
+
+async function restartPPTGeneration(projectId, projectTitle) {
+    const confirmMessage = `确定要重新进行项目「${projectTitle}」的PPT生成吗？\n\n该操作会：\n1. 删除当前已生成的PPT内容\n2. 重置PPT生成阶段状态\n3. 跳转到模板选择页，重新选择主题并发起生成`;
+    if (!window.confirm(confirmMessage)) {
+        return;
+    }
+
+    setLoadingOverlay('正在重置PPT生成流程...');
+    try {
+        const currentEndpoint = `/api/projects/${projectId}/restart-ppt-generation`;
+        const legacyEndpoint = `/api/projects/${projectId}/restart-ppt-generation-entry`;
+
+        let { response, payload } = await tryPostJson(currentEndpoint);
+
+        // 兼容旧版本后端仅保留 legacy endpoint 的情况
+        if (response.status === 404) {
+            ({ response, payload } = await tryPostJson(legacyEndpoint));
+        }
+
+        if (!response.ok) {
+            throw new Error(payload.detail || payload.message || '重新生成PPT失败');
+        }
+
+        showNotification('已重置成功，正在跳转到模板选择页...', 'success');
+        setTimeout(() => {
+            window.location.href = payload.next_url || `/projects/${projectId}/template-selection`;
+        }, 500);
+    } catch (error) {
+        hideLoadingOverlay();
+        showNotification('重新生成PPT失败：' + error.message, 'error');
+    }
 }
 
 function showNotification(message, type = 'info') {
@@ -746,6 +831,34 @@ function showNotification(message, type = 'info') {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('button[data-action="restart-ppt"]:not(.js-delete-project-btn)').forEach((button) => {
+        button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const projectId = button.dataset.projectId;
+            if (!projectId) {
+                showNotification('重新生成PPT失败：缺少项目ID', 'error');
+                return;
+            }
+            const row = button.closest('.project-list-item');
+            const projectTitle = row?.querySelector('.project-title')?.textContent?.trim() || '该项目';
+            restartPPTGeneration(projectId, projectTitle);
+        });
+    });
+
+    document.querySelectorAll('button[data-action="delete-project"]:not(.js-restart-ppt-btn)').forEach((button) => {
+        button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const projectId = button.dataset.projectId;
+            if (!projectId) {
+                showNotification('删除失败：缺少项目ID', 'error');
+                return;
+            }
+            const row = button.closest('.project-list-item');
+            const projectTitle = row?.querySelector('.project-title')?.textContent?.trim() || '该项目';
+            confirmDeleteProject(projectId, projectTitle);
+        });
+    });
+
     document.getElementById('deleteModal')?.addEventListener('click', function(e) {
         if (e.target === this) closeDeleteModal();
     });

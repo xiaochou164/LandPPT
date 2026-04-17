@@ -648,75 +648,47 @@
         }
 
         async function ensureFreeTemplateConfirmedBeforeStart() {
-            // 首先快速检查是否可能是自由模板（使用缓存或快速检测）
-            // 如果怀疑是自由模板，立即显示弹窗，然后在弹窗内部进行详细检测
-
-            // 先尝试从页面数据快速判断
-            let quickCheckIsFree = false;
-
-            // 检查页面是否有自由模板相关的元素或数据
+            // 仅在真正 free mode 时进入自由模板流程
             const projectMetaFromPage = {{ (project.project_metadata | tojson | safe) if project and project.project_metadata else '{}'
         }};
-        if (projectMetaFromPage.template_mode === 'free') {
-            quickCheckIsFree = true;
-        }
+            const quickCheckIsFree = projectMetaFromPage.template_mode === 'free';
 
-        // 如果快速检查不是自由模板，做完整的API检查
-        if (!quickCheckIsFree) {
-            try {
-                const meta = await fetchProjectMeta();
-                const metadata = meta.project_metadata || {};
+            // 如果快速检查不是自由模板，做完整的API检查
+            if (!quickCheckIsFree) {
+                try {
+                    const meta = await fetchProjectMeta();
+                    const metadata = meta.project_metadata || {};
+                    const isFreeTemplate = metadata.template_mode === 'free';
 
-                // 检测是否是自由模板：多种检测方式
-                let isFreeTemplate = metadata.template_mode === 'free';
-
-                // 如果还不是，检查选中的模板是否是 AI 生成的自由模板
-                if (!isFreeTemplate) {
-                    try {
-                        const templateResp = await fetch(`/api/projects/{{ todo_board.task_id }}/selected-global-template`);
-                        if (templateResp.ok) {
-                            const templateData = await templateResp.json();
-                            if (templateData.template && (
-                                templateData.template.created_by === 'ai_free' ||
-                                (templateData.template.template_name && templateData.template.template_name.startsWith('自由模板'))
-                            )) {
-                                isFreeTemplate = true;
-                            }
-                        }
-                    } catch (e) {
-                        // Ignore errors
+                    if (!isFreeTemplate) {
+                        return true;
                     }
-                }
 
-                if (!isFreeTemplate) {
-                    return true;
-                }
+                    // 是自由模板，检查是否已经确认过
+                    if (metadata.free_template_confirmed) {
+                        return true;
+                    }
 
-                // 是自由模板，检查是否已经确认过
-                if (metadata.free_template_confirmed) {
-                    return true;
-                }
+                    // 弹窗只在这里显示：用户手动点击开始生成且自由模板未确认
+                    return await openFreeTemplateWizardAndWait(false);
 
-                // 弹窗只在这里显示：用户手动点击开始生成且自由模板未确认
-                return await openFreeTemplateWizardAndWait(false);
-
-            } catch (e) {
-                // 如果检测失败，询问用户
-                if (confirm('无法检测模板类型，是否继续生成？')) {
-                    return true;
+                } catch (e) {
+                    // 如果检测失败，询问用户
+                    if (confirm('无法检测模板类型，是否继续生成？')) {
+                        return true;
+                    }
+                    return false;
                 }
-                return false;
             }
-        }
 
-        // 快速检测到是自由模板，检查是否已确认
-        const quickConfirmed = projectMetaFromPage.free_template_confirmed;
-        if (quickConfirmed) {
-            return true;
-        }
+            // 快速检测到是自由模板，检查是否已确认
+            const quickConfirmed = projectMetaFromPage.free_template_confirmed;
+            if (quickConfirmed) {
+                return true;
+            }
 
-        // 快速检测到是自由模板但未确认，需要显示弹窗（这种情况很少见，因为快速检查通常在页面有明确数据时才会触发）
-        return await openFreeTemplateWizardAndWaitImmediate();
+            // 快速检测到是自由模板但未确认，需要显示弹窗（这种情况很少见，因为快速检查通常在页面有明确数据时才会触发）
+            return await openFreeTemplateWizardAndWaitImmediate();
         }
 
         // 立即显示自由模板弹窗（先显示再加载）

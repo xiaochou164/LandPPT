@@ -464,42 +464,47 @@ class DatabaseService:
                 return False
 
         update_data = {"slides_html": slides_html}
-        if slides_data:
+        if slides_data is not None:
             update_data["slides_data"] = slides_data
 
-            # 获取现有幻灯片数量，确保不会意外删除幻灯片
-            existing_slides = await self.slide_repo.get_slides_by_project_id(project_id)
-            existing_count = len(existing_slides)
-            new_count = len(slides_data)
+            # 允许传入空数组显式清空旧幻灯片数据
+            if len(slides_data) == 0:
+                await self.slide_repo.delete_slides_by_project_id(project_id)
+                logger.info(f"🧹 已清空项目 {project_id} 的所有幻灯片记录")
+            else:
+                # 获取现有幻灯片数量，确保不会意外删除幻灯片
+                existing_slides = await self.slide_repo.get_slides_by_project_id(project_id)
+                existing_count = len(existing_slides)
+                new_count = len(slides_data)
 
-            logger.info(f"🔄 开始批量更新幻灯片: 现有{existing_count}页, 新数据{new_count}页")
+                logger.info(f"🔄 开始批量更新幻灯片: 现有{existing_count}页, 新数据{new_count}页")
 
-            # 准备幻灯片数据
-            slides_records = []
-            for i, slide_data in enumerate(slides_data):
-                slide_record = {
-                    "project_id": project_id,
-                    "slide_index": i,
-                    "slide_id": slide_data.get("slide_id", f"slide_{i}"),
-                    "title": slide_data.get("title", f"Slide {i+1}"),
-                    "content_type": slide_data.get("content_type", "content"),
-                    "html_content": slide_data.get("html_content", ""),
-                    "slide_metadata": slide_data.get("metadata", {}),
-                    "is_user_edited": slide_data.get("is_user_edited", False)
-                }
-                slides_records.append(slide_record)
+                # 准备幻灯片数据
+                slides_records = []
+                for i, slide_data in enumerate(slides_data):
+                    slide_record = {
+                        "project_id": project_id,
+                        "slide_index": i,
+                        "slide_id": slide_data.get("slide_id", f"slide_{i}"),
+                        "title": slide_data.get("title", f"Slide {i+1}"),
+                        "content_type": slide_data.get("content_type", "content"),
+                        "html_content": slide_data.get("html_content", ""),
+                        "slide_metadata": slide_data.get("metadata", {}),
+                        "is_user_edited": slide_data.get("is_user_edited", False)
+                    }
+                    slides_records.append(slide_record)
 
-            # 使用批量upsert方式更新幻灯片
-            try:
-                batch_success = await self.slide_repo.batch_upsert_slides(project_id, slides_records)
-                if batch_success:
-                    logger.info(f"✅ 批量更新幻灯片成功: {new_count}页")
-                else:
-                    logger.error(f"❌ 批量更新幻灯片失败")
+                # 使用批量upsert方式更新幻灯片
+                try:
+                    batch_success = await self.slide_repo.batch_upsert_slides(project_id, slides_records)
+                    if batch_success:
+                        logger.info(f"✅ 批量更新幻灯片成功: {new_count}页")
+                    else:
+                        logger.error(f"❌ 批量更新幻灯片失败")
+                        return False
+                except Exception as e:
+                    logger.error(f"❌ 批量更新幻灯片异常: {e}")
                     return False
-            except Exception as e:
-                logger.error(f"❌ 批量更新幻灯片异常: {e}")
-                return False
 
         result = await self.project_repo.update(project_id, update_data)
         return result is not None

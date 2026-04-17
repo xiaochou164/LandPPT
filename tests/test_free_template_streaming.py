@@ -195,3 +195,16 @@ def test_free_template_streaming_route_and_frontend_use_sse_preview_pipeline():
     assert 'iframe.srcdoc = freeTemplateCurrentHtml;' in script_text
     assert "html_template: getFreeTemplateHtmlForConfirm()" in script_text
     assert 'submitted_html = data.get("html_template")' in route_text
+
+
+def test_frontend_free_mode_detection_relies_only_on_template_mode_metadata():
+    component_script = _read("src/landppt/web/templates/components/project/todo_board_with_editor/script_1.html")
+    page_script = _read("src/landppt/web/templates/todo_board_with_editor.html")
+
+    for script_text in (component_script, page_script):
+        assert "projectMetaFromPage.template_mode === 'free'" in script_text
+        assert "const isFreeTemplate = metadata.template_mode === 'free';" in script_text
+        assert "templateData.template.created_by === 'ai_free'" not in script_text
+        assert "template_name.startsWith('自由模板')" not in script_text
+        assert "metadata.free_template_html" not in script_text
+        assert "projectMetaFromPage.free_template_html" not in script_text

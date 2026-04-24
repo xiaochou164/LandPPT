@@ -701,7 +701,19 @@
                                 style="font-family: monospace; font-size: 0.9em; margin-bottom: 8px;">
                             <small style="color: #6c757d; font-size: 0.85em; line-height: 1.4;">
                                 用于深度研究功能的API密钥，可在 <a href="https://tavily.com" target="_blank"
-                                    style="color: #111111; text-decoration: underline;">Tavily官网</a> 获取。若管理员已在后台设置系统默认值，这里可以留空，系统会自动回退到后台默认 Tavily Key。
+                                    style="color: #111111; text-decoration: underline;">Tavily官网</a> 获取。
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            <label style="font-weight: 600; color: #495057; margin-bottom: 8px; display: block;">
+                                Tavily API Base URL
+                            </label>
+                            <input type="url" name="tavily_base_url" placeholder="https://api.tavily.com"
+                                value="{{ current_config.get('tavily_base_url', '') }}"
+                                style="font-family: monospace; font-size: 0.9em; margin-bottom: 8px;">
+                            <small style="color: #6c757d; font-size: 0.85em; line-height: 1.4;">
+                                可选的 Tavily 自定义接口地址。
                             </small>
                         </div>
 

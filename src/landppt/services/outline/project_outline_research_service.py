@@ -301,7 +301,7 @@ class ProjectOutlineResearchService:
             logger.info('Step 2: 处理本地文件...')
             local_files_content = []
             if file_paths:
-                from ..services.file_processor import FileProcessor
+                from ..file_processor import FileProcessor
                 file_processor = FileProcessor()
                 selected_processing_mode = None
                 try:

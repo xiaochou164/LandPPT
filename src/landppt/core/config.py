@@ -89,6 +89,7 @@ class AIConfig(BaseSettings):
 
     # Tavily API Configuration (for research functionality)
     tavily_api_key: Optional[str] = Field(default=None, env="TAVILY_API_KEY")
+    tavily_base_url: Optional[str] = Field(default="https://api.tavily.com", env="TAVILY_BASE_URL")
     tavily_max_results: int = Field(default=10, env="TAVILY_MAX_RESULTS")
     tavily_search_depth: str = Field(default="advanced", env="TAVILY_SEARCH_DEPTH")
     tavily_include_domains: Optional[str] = Field(default=None, env="TAVILY_INCLUDE_DOMAINS")
@@ -555,6 +556,7 @@ def reload_ai_config():
 
     # Update Tavily configuration
     ai_config.tavily_api_key = os.environ.get('TAVILY_API_KEY', ai_config.tavily_api_key)
+    ai_config.tavily_base_url = os.environ.get('TAVILY_BASE_URL', ai_config.tavily_base_url)
     ai_config.tavily_max_results = int(os.environ.get('TAVILY_MAX_RESULTS', str(ai_config.tavily_max_results)))
     ai_config.tavily_search_depth = os.environ.get('TAVILY_SEARCH_DEPTH', ai_config.tavily_search_depth)
     ai_config.tavily_include_domains = os.environ.get('TAVILY_INCLUDE_DOMAINS', ai_config.tavily_include_domains)

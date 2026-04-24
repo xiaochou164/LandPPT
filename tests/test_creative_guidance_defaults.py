@@ -20,6 +20,40 @@ def test_db_config_service_defaults_enable_per_slide_creative_guidance():
     assert service.config_schema["enable_per_slide_creative_guidance"]["default"] == "true"
 
 
+def test_tavily_base_url_exists_in_config_schemas():
+    from landppt.services.config_service import ConfigService
+    from landppt.services.db_config_service import DatabaseConfigService
+
+    env_service = ConfigService(env_file=".env.example")
+    db_service = DatabaseConfigService()
+
+    assert env_service.config_schema["tavily_base_url"]["type"] == "url"
+    assert env_service.config_schema["tavily_base_url"]["category"] == "generation_params"
+    assert env_service.config_schema["tavily_base_url"]["default"] == "https://api.tavily.com"
+    assert db_service.config_schema["tavily_base_url"]["type"] == "url"
+    assert db_service.config_schema["tavily_base_url"]["category"] == "generation_params"
+    assert db_service.config_schema["tavily_base_url"]["default"] == "https://api.tavily.com"
+
+
+def test_db_config_service_resolves_blank_tavily_base_url_to_official_default():
+    from landppt.services.db_config_service import DatabaseConfigService
+
+    service = DatabaseConfigService()
+    resolved = service._resolve_config_values(
+        {
+            "tavily_base_url": {
+                "value": "",
+                "type": "url",
+                "category": "generation_params",
+                "is_user_override": True,
+            },
+        },
+        {},
+    )
+
+    assert resolved["tavily_base_url"] == "https://api.tavily.com"
+
+
 def test_apryse_standard_pptx_export_is_admin_only_in_config_schema():
     from landppt.services.config_service import ConfigService
     from landppt.services.db_config_service import DatabaseConfigService

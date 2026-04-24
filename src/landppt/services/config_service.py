@@ -93,6 +93,7 @@ class ConfigService:
             "enable_per_slide_creative_guidance": {"type": "boolean", "category": "generation_params", "default": "true"},
             
             "tavily_api_key": {"type": "password", "category": "generation_params"},
+            "tavily_base_url": {"type": "url", "category": "generation_params", "default": "https://api.tavily.com"},
             "tavily_max_results": {"type": "number", "category": "generation_params", "default": "10"},
             "tavily_search_depth": {"type": "select", "category": "generation_params", "default": "advanced"},
 

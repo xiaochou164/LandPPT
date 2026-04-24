@@ -599,6 +599,18 @@
 
                         <div class="form-group">
                             <label style="font-weight: 600; color: #495057; margin-bottom: 8px; display: block;">
+                                Tavily API Base URL
+                            </label>
+                            <input type="url" name="tavily_base_url" placeholder="https://api.tavily.com"
+                                value="{{ current_config.get('tavily_base_url', '') }}"
+                                style="font-family: monospace; font-size: 0.9em; margin-bottom: 8px;">
+                            <small style="color: #6c757d; font-size: 0.85em; line-height: 1.4;">
+                                可选的 Tavily 自定义接口地址。留空则使用官方默认地址，适用于反向代理、网关或私有部署。
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            <label style="font-weight: 600; color: #495057; margin-bottom: 8px; display: block;">
                                 SearXNG 主机地址
                             </label>
                             <input type="url" name="searxng_host" placeholder="http://localhost:8888"
@@ -4516,12 +4528,15 @@
         if (!tab) return;
 
         const config = {};
+        const tavilyDefaultBaseUrl = 'https://api.tavily.com';
         const inputs = tab.querySelectorAll('input, select');
 
         inputs.forEach(input => {
             if (input.name) {
                 if (input.type === 'checkbox') {
                     config[input.name] = input.checked;
+                } else if (input.name === 'tavily_base_url') {
+                    config[input.name] = (input.value || '').trim() || tavilyDefaultBaseUrl;
                 } else if (input.value) {
                     config[input.name] = input.value;
                 }

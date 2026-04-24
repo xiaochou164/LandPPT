@@ -49,13 +49,17 @@ class RuntimeResearchService:
     def __getattr__(self, name: str):
         return getattr(self._service, name)
 
+    @property
+    def _owner(self):
+        return self._service._service
+
     def _initialize_research_services(self):
             """Initialize research services (enhanced + legacy) with best-effort fallbacks."""
             # Always define attributes so call sites can rely on them.
-            self.enhanced_research_service = None
-            self.enhanced_report_generator = None
-            self.research_service = None
-            self.report_generator = None
+            self._owner.enhanced_research_service = None
+            self._owner.enhanced_report_generator = None
+            self._owner.research_service = None
+            self._owner.report_generator = None
 
             # Prefer a stable, writable reports directory (instead of relying on CWD).
             reports_dir = None
@@ -69,44 +73,44 @@ class RuntimeResearchService:
 
             # Enhanced research service (Tavily + SearXNG + content extraction)
             try:
-                self.enhanced_research_service = EnhancedResearchService(user_id=self.user_id)
+                self._owner.enhanced_research_service = EnhancedResearchService(user_id=self.user_id)
             except Exception as e:
                 logger.warning(f"Failed to initialize enhanced research service: {e}")
-                self.enhanced_research_service = None
+                self._owner.enhanced_research_service = None
 
             try:
                 if reports_dir is not None:
-                    self.enhanced_report_generator = EnhancedReportGenerator(reports_dir=str(reports_dir))
+                    self._owner.enhanced_report_generator = EnhancedReportGenerator(reports_dir=str(reports_dir))
                 else:
-                    self.enhanced_report_generator = EnhancedReportGenerator()
+                    self._owner.enhanced_report_generator = EnhancedReportGenerator()
             except Exception as e:
                 logger.warning(f"Failed to initialize enhanced report generator: {e}")
-                self.enhanced_report_generator = None
+                self._owner.enhanced_report_generator = None
 
             # Legacy DEEP research service (Tavily-only) used by older workflow paths.
             try:
                 from ..deep_research_service import DEEPResearchService
-                self.research_service = DEEPResearchService(user_id=self.user_id)
+                self._owner.research_service = DEEPResearchService(user_id=self.user_id)
             except Exception as e:
                 logger.warning(f"Failed to initialize legacy research service: {e}")
-                self.research_service = None
+                self._owner.research_service = None
 
             try:
                 from ..research_report_generator import ResearchReportGenerator
                 if reports_dir is not None:
-                    self.report_generator = ResearchReportGenerator(reports_dir=str(reports_dir))
+                    self._owner.report_generator = ResearchReportGenerator(reports_dir=str(reports_dir))
                 else:
-                    self.report_generator = ResearchReportGenerator()
+                    self._owner.report_generator = ResearchReportGenerator()
             except Exception as e:
                 logger.warning(f"Failed to initialize legacy report generator: {e}")
-                self.report_generator = None
+                self._owner.report_generator = None
 
             # Best-effort status logging (do not fail init based on availability checks).
             try:
-                if self.enhanced_research_service is not None:
+                if self._owner.enhanced_research_service is not None:
                     providers = []
                     try:
-                        providers = self.enhanced_research_service.get_available_providers()
+                        providers = self._owner.enhanced_research_service.get_available_providers()
                     except Exception:
                         providers = []
                     logger.info(
@@ -114,7 +118,7 @@ class RuntimeResearchService:
                         self.user_id,
                         ", ".join(providers) if providers else "unknown",
                     )
-                elif self.research_service is not None:
+                elif self._owner.research_service is not None:
                     logger.info("Legacy research service initialized (user_id=%s)", self.user_id)
                 else:
                     logger.warning("No research service initialized (user_id=%s)", self.user_id)
@@ -124,20 +128,20 @@ class RuntimeResearchService:
 
     def _get_preferred_outline_research_runtime(self) -> Dict[str, Any]:
             """Return the preferred research runtime for outline generation."""
-            enhanced_service = getattr(self, "enhanced_research_service", None)
+            enhanced_service = getattr(self._owner, "enhanced_research_service", None)
             if enhanced_service is not None and getattr(enhanced_service, "is_available", lambda: True)():
                 return {
                     "service": enhanced_service,
-                    "report_generator": getattr(self, "enhanced_report_generator", None),
+                    "report_generator": getattr(self._owner, "enhanced_report_generator", None),
                     "provider": "enhanced",
                     "is_enhanced": True,
                 }
 
-            legacy_service = getattr(self, "research_service", None)
+            legacy_service = getattr(self._owner, "research_service", None)
             if legacy_service is not None and getattr(legacy_service, "is_available", lambda: True)():
                 return {
                     "service": legacy_service,
-                    "report_generator": getattr(self, "report_generator", None),
+                    "report_generator": getattr(self._owner, "report_generator", None),
                     "provider": "legacy",
                     "is_enhanced": False,
                 }
@@ -455,7 +459,7 @@ class RuntimeResearchService:
 
     def reload_research_config(self):
             """Reload enhanced research service configuration"""
-            if hasattr(self, 'enhanced_research_service') and self.enhanced_research_service:
+            if hasattr(self._owner, 'enhanced_research_service') and self._owner.enhanced_research_service:
                 try:
                     # Enhanced research service doesn't have reload_config method, so reinitialize
                     self._initialize_research_services()

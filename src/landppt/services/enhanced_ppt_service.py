@@ -107,9 +107,11 @@ class EnhancedPPTService(PPTService):
             self.cache_dirs = None
 
         # 初始化研究服务
+        self.enhanced_research_service = None
+        self.enhanced_report_generator = None
         self.research_service = None
         self.report_generator = None
-        self.runtime_support._initialize_research_services()
+        self._initialize_research_services()
 
         # 初始化图片服务
         self.image_service = None
@@ -166,6 +168,10 @@ class EnhancedPPTService(PPTService):
 
     def iter_research_stream_payloads(self, event: Dict[str, Any]) -> List[Dict[str, Any]]:
         return self.runtime_support.iter_research_stream_payloads(event)
+
+
+    def _initialize_research_services(self):
+        return self.runtime_support._initialize_research_services()
 
 
     def reload_research_config(self):
@@ -296,8 +302,11 @@ class EnhancedPPTService(PPTService):
         return await self.project_outline_workflow._execute_project_workflow(project_id, request, user_id)
 
 
-    async def generate_outline_streaming(self, project_id: str):
-        async for item in self.project_outline_workflow.generate_outline_streaming(project_id):
+    async def generate_outline_streaming(self, project_id: str, *, force_regenerate: bool = False):
+        async for item in self.project_outline_workflow.generate_outline_streaming(
+            project_id,
+            force_regenerate=force_regenerate,
+        ):
             yield item
 
 

@@ -290,7 +290,7 @@ class ProjectOutlineStreamingService:
 
         return
 
-    async def generate_outline_streaming(self, project_id: str):
+    async def generate_outline_streaming(self, project_id: str, *, force_regenerate: bool = False):
         """Generate outline with streaming output"""
         try:
             project = await self.project_manager.get_project(project_id)
@@ -298,9 +298,17 @@ class ProjectOutlineStreamingService:
                 raise ValueError('Project not found')
             from ..file_outline_utils import extract_saved_file_outline, should_force_file_outline_regeneration
             force_file_outline_regeneration = should_force_file_outline_regeneration(project.confirmed_requirements or {})
-            if force_file_outline_regeneration:
-                logger.info('Project %s requested file outline regeneration, skipping saved outline cache', project_id)
-            file_generated_outline = extract_saved_file_outline(project.outline, project.confirmed_requirements or {}, ignore_saved_outline=force_file_outline_regeneration)
+            ignore_saved_outline = bool(force_regenerate or force_file_outline_regeneration)
+            if ignore_saved_outline:
+                logger.info(
+                    'Project %s requested fresh outline generation, skipping saved outline cache',
+                    project_id,
+                )
+            file_generated_outline = extract_saved_file_outline(
+                project.outline,
+                project.confirmed_requirements or {},
+                ignore_saved_outline=ignore_saved_outline,
+            )
             if file_generated_outline:
                 logger.info('Project %s already has reusable outline generated from file, using existing outline', project_id)
             if file_generated_outline:

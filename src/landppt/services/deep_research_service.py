@@ -32,6 +32,13 @@ def _normalize_secret_value(value: Any) -> Optional[str]:
     return normalized
 
 
+def _normalize_url_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
 def _mask_secret_suffix(value: Optional[str]) -> str:
     if not value:
         return "None"
@@ -94,13 +101,17 @@ class DEEPResearchService:
         """Initialize Tavily client synchronously (fallback)"""
         try:
             current_api_key = _normalize_secret_value(ai_config.tavily_api_key)
+            current_base_url = _normalize_url_value(getattr(ai_config, "tavily_base_url", None))
             logger.info(
                 "Initializing Tavily client with API key: %s",
                 _mask_secret_suffix(current_api_key),
             )
 
             if current_api_key:
-                self.tavily_client = TavilyClient(api_key=current_api_key)
+                client_kwargs = {"api_key": current_api_key}
+                if current_base_url:
+                    client_kwargs["api_base_url"] = current_base_url
+                self.tavily_client = TavilyClient(**client_kwargs)
                 logger.info("Tavily client initialized successfully")
             else:
                 logger.warning("Tavily API key not found in configuration")
@@ -120,39 +131,9 @@ class DEEPResearchService:
             self._active_tavily_key_source = None
             return None
 
+        runtime_config = await self._get_tavily_runtime_config_async()
         source, api_key = candidates[0]
-        return self._create_tavily_client(api_key, source)
-
-        api_key = None
-        if self.user_id is not None:
-            try:
-                from .db_config_service import get_db_config_service
-                db_config_service = get_db_config_service()
-                user_config = await db_config_service.get_all_config(user_id=self.user_id)
-                api_key = user_config.get("tavily_api_key")
-                if api_key:
-                    logger.info(f"DEEPResearchService: Using Tavily API key from user database (user_id={self.user_id})")
-            except Exception as e:
-                logger.warning(f"Failed to get Tavily API key from database: {e}")
-        
-        # 如果数据库没有配置，使用全局配置
-        if not api_key:
-            api_key = ai_config.tavily_api_key
-        
-        # 如果 API key 变化了或者客户端未初始化，重新创建客户端
-        if api_key:
-            try:
-                # 总是创建新客户端以使用最新配置
-                self.tavily_client = TavilyClient(api_key=api_key)
-                logger.info(f"Tavily client initialized with API key: {'***' + api_key[-4:] if len(api_key) > 4 else '***'}")
-            except Exception as e:
-                logger.error(f"Failed to initialize Tavily client: {e}")
-                self.tavily_client = None
-        else:
-            logger.warning("Tavily API key not found in any configuration")
-            self.tavily_client = None
-        
-        return self.tavily_client
+        return self._create_tavily_client(api_key, source, runtime_config.get("base_url"))
 
     async def _get_tavily_api_key_candidates_async(self) -> List[Tuple[str, str]]:
         candidates: List[Tuple[str, str]] = []
@@ -189,14 +170,66 @@ class DEEPResearchService:
         add_candidate("process environment", ai_config.tavily_api_key)
         return candidates
 
-    def _create_tavily_client(self, api_key: str, source: str):
+    async def _get_tavily_runtime_config_async(self) -> Dict[str, Any]:
+        config = {
+            "base_url": _normalize_url_value(getattr(ai_config, "tavily_base_url", None)),
+            "max_results": getattr(ai_config, "tavily_max_results", 10),
+            "search_depth": getattr(ai_config, "tavily_search_depth", "advanced") or "advanced",
+            "include_domains": None,
+            "exclude_domains": None,
+        }
+
+        if ai_config.tavily_include_domains:
+            config["include_domains"] = [
+                domain.strip() for domain in str(ai_config.tavily_include_domains).split(",") if domain.strip()
+            ]
+        if ai_config.tavily_exclude_domains:
+            config["exclude_domains"] = [
+                domain.strip() for domain in str(ai_config.tavily_exclude_domains).split(",") if domain.strip()
+            ]
+
+        if self.user_id is None:
+            return config
+
         try:
-            self.tavily_client = TavilyClient(api_key=api_key)
+            from ..database.database import AsyncSessionLocal
+            from ..database.repositories import UserConfigRepository
+
+            async with AsyncSessionLocal() as session:
+                repo = UserConfigRepository(session)
+                db_configs = await repo.get_all_configs(self.user_id)
+
+            if "tavily_base_url" in db_configs:
+                normalized_db_base_url = _normalize_url_value(db_configs["tavily_base_url"].get("value"))
+                if normalized_db_base_url:
+                    config["base_url"] = normalized_db_base_url
+            if "tavily_max_results" in db_configs:
+                try:
+                    config["max_results"] = max(1, int(float(db_configs["tavily_max_results"].get("value"))))
+                except (TypeError, ValueError):
+                    pass
+            if "tavily_search_depth" in db_configs:
+                search_depth = str(db_configs["tavily_search_depth"].get("value") or "").strip()
+                if search_depth:
+                    config["search_depth"] = search_depth
+        except Exception as e:
+            logger.warning(f"Failed to load Tavily runtime config from database: {e}")
+
+        return config
+
+    def _create_tavily_client(self, api_key: str, source: str, base_url: Optional[str] = None):
+        try:
+            client_kwargs = {"api_key": api_key}
+            normalized_base_url = _normalize_url_value(base_url)
+            if normalized_base_url:
+                client_kwargs["api_base_url"] = normalized_base_url
+            self.tavily_client = TavilyClient(**client_kwargs)
             self._active_tavily_key_source = source
             logger.info(
-                "Tavily client initialized using %s key: %s",
+                "Tavily client initialized using %s key: %s%s",
                 source,
                 _mask_secret_suffix(api_key),
+                f" via {normalized_base_url}" if normalized_base_url else "",
             )
             return self.tavily_client
         except Exception as e:
@@ -612,21 +645,22 @@ class DEEPResearchService:
         if not candidates:
             raise ValueError("Tavily client not initialized - API key may be missing")
 
+        runtime_config = await self._get_tavily_runtime_config_async()
         search_params = {
             "query": query,
-            "search_depth": "advanced",
-            "max_results": ai_config.tavily_max_results,
+            "search_depth": runtime_config["search_depth"],
+            "max_results": runtime_config["max_results"],
             "include_answer": True,
             "include_raw_content": False
         }
-        if ai_config.tavily_include_domains:
-            search_params["include_domains"] = ai_config.tavily_include_domains.split(',')
-        if ai_config.tavily_exclude_domains:
-            search_params["exclude_domains"] = ai_config.tavily_exclude_domains.split(',')
+        if runtime_config["include_domains"]:
+            search_params["include_domains"] = runtime_config["include_domains"]
+        if runtime_config["exclude_domains"]:
+            search_params["exclude_domains"] = runtime_config["exclude_domains"]
 
         last_auth_error = None
         for index, (source, api_key) in enumerate(candidates):
-            tavily_client = self._create_tavily_client(api_key, source)
+            tavily_client = self._create_tavily_client(api_key, source, runtime_config.get("base_url"))
             if not tavily_client:
                 continue
 
@@ -984,6 +1018,7 @@ class DEEPResearchService:
             "tavily_available": self.tavily_client is not None,
             "ai_provider_available": self.ai_provider is not None,
             "ai_provider_type": ai_config.default_ai_provider,
+            "base_url": getattr(ai_config, "tavily_base_url", None),
             "max_results": ai_config.tavily_max_results,
             "search_depth": ai_config.tavily_search_depth
         }

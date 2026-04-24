@@ -1130,7 +1130,7 @@
     // ** FIX START **
     // Moved startOutlineGenerationNew function to the global scope
 
-    async function startOutlineGenerationNew() {
+    async function startOutlineGenerationNew(options = {}) {
         console.log('Starting new outline generation (streaming)');
 
         // 防止重复调用
@@ -1151,6 +1151,7 @@
 
         lastOutlineErrorMessage = '';
         lastOutlineErrorRetryHandler = 'regenerateOutlineNew';
+        const forceRegenerate = options && options.forceRegenerate === true;
 
         // 标记为已开始
         outlineGenerationStarted = true;
@@ -1239,7 +1240,10 @@
 
         try {
             // 调用流式大纲生成接口（避免长时间请求导致 504）
-            const response = await fetch(`/projects/${currentProjectId}/outline-stream`);
+            const streamUrl = forceRegenerate
+                ? `/projects/${currentProjectId}/outline-stream?force_regenerate=1`
+                : `/projects/${currentProjectId}/outline-stream`;
+            const response = await fetch(streamUrl);
 
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -1914,7 +1918,7 @@
             if (result.defer_generation) {
                 outlineGenerationStarted = false;
                 setTimeout(() => {
-                    startOutlineGenerationNew();
+                    startOutlineGenerationNew({ forceRegenerate: true });
                 }, 100);
                 return;
             }
@@ -2243,7 +2247,7 @@
             if (result.defer_generation) {
                 outlineGenerationStarted = false;
                 setTimeout(() => {
-                    startOutlineGenerationNew();
+                    startOutlineGenerationNew({ forceRegenerate: true });
                 }, 100);
                 return;
             }

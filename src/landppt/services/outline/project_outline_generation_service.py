@@ -84,8 +84,11 @@ class ProjectOutlineGenerationService:
     def _extract_summeryanyfile_llm_call_count(self, generator) -> int:
         return self._creation_service._extract_summeryanyfile_llm_call_count(generator)
 
-    async def generate_outline_streaming(self, project_id: str):
-        async for item in self._streaming_service.generate_outline_streaming(project_id):
+    async def generate_outline_streaming(self, project_id: str, *, force_regenerate: bool = False):
+        async for item in self._streaming_service.generate_outline_streaming(
+            project_id,
+            force_regenerate=force_regenerate,
+        ):
             yield item
 
     async def _validate_and_repair_outline_json(self, outline_data: Dict[str, Any], confirmed_requirements: Dict[str, Any]) -> Dict[str, Any]:

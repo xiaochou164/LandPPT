@@ -1737,12 +1737,15 @@
             if (!tab) return;
 
             const config = {};
+            const tavilyDefaultBaseUrl = 'https://api.tavily.com';
             const inputs = tab.querySelectorAll('input, select');
 
             inputs.forEach(input => {
                 if (input.name) {
                     if (input.type === 'checkbox') {
                         config[input.name] = input.checked;
+                    } else if (input.name === 'tavily_base_url') {
+                        config[input.name] = (input.value || '').trim() || tavilyDefaultBaseUrl;
                     } else if (input.value) {
                         config[input.name] = input.value;
                     }

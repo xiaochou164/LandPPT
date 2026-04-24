@@ -32,6 +32,7 @@ router = APIRouter()
 @router.get("/projects/{project_id}/outline-stream")
 async def stream_outline_generation(
     project_id: str,
+    force_regenerate: bool = False,
     user: User = Depends(get_current_user_required)
 ):
     """Stream outline generation for a project"""
@@ -71,12 +72,24 @@ async def stream_outline_generation(
             force_file_outline_regeneration = bool(
                 confirmed_requirements.get("force_file_outline_regeneration")
             )
-            has_saved_file_outline = _extract_saved_file_outline(project, confirmed_requirements) is not None
+            force_fresh_generation = bool(force_regenerate or force_file_outline_regeneration)
+            if force_fresh_generation:
+                logger.info(
+                    "Project %s outline stream requested fresh regeneration; skipping reusable outline branches",
+                    project_id,
+                )
+            has_saved_file_outline = (
+                False if force_fresh_generation
+                else (_extract_saved_file_outline(project, confirmed_requirements) is not None)
+            )
 
             try:
-                chunk_source = user_ppt_service.generate_outline_streaming(project_id)
+                chunk_source = user_ppt_service.generate_outline_streaming(
+                    project_id,
+                    force_regenerate=force_fresh_generation,
+                )
                 if content_source in ("file", "url") and (
-                    force_file_outline_regeneration or not has_saved_file_outline
+                    force_fresh_generation or not has_saved_file_outline
                 ):
                     await user_ppt_service.project_manager.update_project_status(
                         project_id, "in_progress", user_id=user.id

@@ -359,6 +359,7 @@ RELOAD=false
 
 # Research Functionality Configuration
 TAVILY_API_KEY=your_tavily_api_key_here        # Tavily search engine
+TAVILY_BASE_URL=https://gateway.example.com/tavily # Optional custom Tavily gateway/proxy URL
 SEARXNG_HOST=http://localhost:8888             # SearXNG instance URL
 RESEARCH_PROVIDER=tavily                       # Research provider: tavily, searxng, both
 

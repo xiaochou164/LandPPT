@@ -371,6 +371,7 @@ RELOAD=false
 
 # 研究功能配置
 TAVILY_API_KEY=your_tavily_api_key_here        # Tavily 搜索引擎
+TAVILY_BASE_URL=https://gateway.example.com/tavily # 可选：自定义 Tavily 网关/代理地址
 SEARXNG_HOST=http://localhost:8888             # SearXNG 实例地址
 RESEARCH_PROVIDER=tavily                       # 研究提供商：tavily, searxng, both
 

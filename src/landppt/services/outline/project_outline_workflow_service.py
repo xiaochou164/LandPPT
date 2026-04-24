@@ -71,8 +71,11 @@ class ProjectOutlineWorkflowService:
     def _create_default_outline(self, request: PPTGenerationRequest) -> PPTOutline:
         return self._outline_generation._create_default_outline(request)
 
-    async def generate_outline_streaming(self, project_id: str):
-        async for item in self._outline_generation.generate_outline_streaming(project_id):
+    async def generate_outline_streaming(self, project_id: str, *, force_regenerate: bool = False):
+        async for item in self._outline_generation.generate_outline_streaming(
+            project_id,
+            force_regenerate=force_regenerate,
+        ):
             yield item
 
     async def _validate_and_repair_outline_json(self, outline_data: Dict[str, Any], confirmed_requirements: Dict[str, Any]) -> Dict[str, Any]:

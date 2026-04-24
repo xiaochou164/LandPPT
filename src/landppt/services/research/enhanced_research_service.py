@@ -530,7 +530,7 @@ class EnhancedResearchService:
                 temperature=0.7,
                 event_callback=event_callback,
                 stage="enhanced_research_plan",
-                title="增强研究计划",
+                title="深度研究计划",
             )
             
             # Extract JSON from response
@@ -776,7 +776,7 @@ class EnhancedResearchService:
                 temperature=0.3,
                 event_callback=event_callback,
                 stage="enhanced_step_analysis",
-                title=f"增强研究分析 #{step.step_number}",
+                title=f"深度研究分析 #{step.step_number}",
                 step_number=step.step_number,
             )
         except Exception as e:
@@ -934,7 +934,7 @@ class EnhancedResearchService:
                 temperature=0.3,
                 event_callback=event_callback,
                 stage="enhanced_report_summary",
-                title="增强研究总结",
+                title="深度研究总结",
             )
         except Exception as e:
             logger.warning(f"Failed to generate executive summary: {e}")

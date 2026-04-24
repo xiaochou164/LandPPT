@@ -99,6 +99,7 @@
             { key: 'enable_parallel_generation', id: 'system_enable_parallel_generation', type: 'boolean', fallback: true },
             { key: 'enable_per_slide_creative_guidance', id: 'system_enable_per_slide_creative_guidance', type: 'boolean', fallback: true },
             { key: 'tavily_api_key', id: 'system_tavily_api_key', type: 'text', fallback: '' },
+            { key: 'tavily_base_url', id: 'system_tavily_base_url', type: 'text', fallback: 'https://api.tavily.com' },
             { key: 'tavily_max_results', id: 'system_tavily_max_results', type: 'number', fallback: 10 },
             { key: 'tavily_search_depth', id: 'system_tavily_search_depth', type: 'select', fallback: 'advanced' },
             { key: 'searxng_host', id: 'system_searxng_host', type: 'text', fallback: '' },
@@ -255,6 +256,11 @@
                         field,
                         rawValue || systemDefaultsSnapshot[field.key] || field.fallback,
                     );
+                    return;
+                }
+
+                if (field.key === 'tavily_base_url') {
+                    payload[field.key] = rawValue || systemDefaultsSnapshot[field.key] || field.fallback;
                     return;
                 }
 

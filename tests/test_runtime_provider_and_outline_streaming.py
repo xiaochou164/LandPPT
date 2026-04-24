@@ -1,5 +1,6 @@
 import sys
 import types
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -19,8 +20,11 @@ if "langchain_core.documents" not in sys.modules:
     setattr(langchain_core_module, "documents", documents_module)
 
 from landppt.ai.base import AIResponse, MessageRole
+from landppt.services.outline.project_outline_research_service import ProjectOutlineResearchService
 from landppt.services.outline.project_outline_streaming_service import ProjectOutlineStreamingService
+from landppt.services.runtime import runtime_research_service as runtime_research_module
 from landppt.services.runtime.runtime_provider_service import RuntimeProviderService
+from landppt.services.runtime.runtime_research_service import RuntimeResearchService
 
 
 class _FakeProvider:
@@ -63,6 +67,76 @@ class _FakeProvider:
 class _RuntimeStubService:
     user_id = None
     provider_name = None
+
+
+class _RuntimeResearchSupportStub:
+    def __init__(self, owner):
+        self._service = owner
+
+    def __getattr__(self, name):
+        return getattr(self._service, name)
+
+
+class _FakeEnhancedResearchService:
+    def __init__(self, user_id=None):
+        self.user_id = user_id
+
+    def get_available_providers(self):
+        return ["fake-enhanced"]
+
+    def is_available(self):
+        return True
+
+
+class _FakeEnhancedReportGenerator:
+    def __init__(self, reports_dir="research_reports"):
+        self.reports_dir = reports_dir
+
+
+class _FakeLegacyResearchService:
+    def __init__(self, user_id=None):
+        self.user_id = user_id
+
+    def is_available(self):
+        return True
+
+
+class _FakeLegacyReportGenerator:
+    def __init__(self, reports_dir="research_reports"):
+        self.reports_dir = reports_dir
+
+
+def test_runtime_research_service_initializes_research_attrs_on_owner(monkeypatch):
+    owner = SimpleNamespace(user_id=42)
+    support = _RuntimeResearchSupportStub(owner)
+    service = RuntimeResearchService(support)
+
+    fake_deep_module = types.ModuleType("landppt.services.deep_research_service")
+    fake_deep_module.DEEPResearchService = _FakeLegacyResearchService
+    fake_report_module = types.ModuleType("landppt.services.research_report_generator")
+    fake_report_module.ResearchReportGenerator = _FakeLegacyReportGenerator
+
+    monkeypatch.setattr(
+        runtime_research_module,
+        "EnhancedResearchService",
+        _FakeEnhancedResearchService,
+    )
+    monkeypatch.setattr(
+        runtime_research_module,
+        "EnhancedReportGenerator",
+        _FakeEnhancedReportGenerator,
+    )
+    monkeypatch.setitem(sys.modules, "landppt.services.deep_research_service", fake_deep_module)
+    monkeypatch.setitem(sys.modules, "landppt.services.research_report_generator", fake_report_module)
+
+    service._initialize_research_services()
+
+    assert isinstance(owner.enhanced_research_service, _FakeEnhancedResearchService)
+    assert isinstance(owner.enhanced_report_generator, _FakeEnhancedReportGenerator)
+    assert isinstance(owner.research_service, _FakeLegacyResearchService)
+    assert isinstance(owner.report_generator, _FakeLegacyReportGenerator)
+    assert service.enhanced_research_service is owner.enhanced_research_service
+    assert service._get_preferred_outline_research_runtime()["service"] is owner.enhanced_research_service
 
 
 @pytest.mark.asyncio
@@ -157,6 +231,43 @@ class _OutlineStreamingStubService:
         }
 
 
+class _OutlineResearchStubService:
+    enhanced_research_service = None
+    enhanced_report_generator = None
+
+    def _initialize_research_services(self):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_project_outline_research_service_uses_direct_file_processor_import(monkeypatch, tmp_path):
+    service = ProjectOutlineResearchService(_OutlineResearchStubService())
+
+    fake_module = types.ModuleType("landppt.services.file_processor")
+
+    class _FakeFileProcessor:
+        async def process_file(self, file_path, filename, file_processing_mode=None):
+            return SimpleNamespace(
+                processed_content=f"{filename}:{file_processing_mode or 'default'}:{file_path}"
+            )
+
+    fake_module.FileProcessor = _FakeFileProcessor
+    monkeypatch.setitem(sys.modules, "landppt.services.file_processor", fake_module)
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+
+    merged_path = await service.conduct_research_and_merge_with_files(
+        topic="Test Topic",
+        language="zh",
+        file_paths=["dummy.txt"],
+        context={"file_processing_mode": "markitdown"},
+    )
+
+    merged_content = Path(merged_path).read_text(encoding="utf-8")
+    assert "dummy.txt" in merged_content
+    assert "markitdown" in merged_content
+    assert str(tmp_path) in str(Path(merged_path).parent.parent)
+
+
 @pytest.mark.asyncio
 async def test_streaming_outline_parser_uses_json_when_available():
     service = ProjectOutlineStreamingService(_OutlineStreamingStubService())
@@ -189,3 +300,91 @@ async def test_streaming_outline_parser_falls_back_to_text_outline_when_json_is_
     assert outline["title"] == "三体解析"
     assert len(outline["slides"]) == 2
     assert len(stub.parsed_content_calls) == 1
+
+
+class _ProjectManagerStub:
+    def __init__(self, project):
+        self.project = project
+        self.projects = {}
+        self.status_updates = []
+
+    async def get_project(self, project_id):
+        return self.project
+
+    async def update_project_status(self, project_id, status):
+        self.status_updates.append((project_id, status))
+
+
+class _OutlineStreamingFreshGenerationStubService:
+    def __init__(self, project):
+        self.project_manager = _ProjectManagerStub(project)
+        self.stage_updates = []
+
+    async def _update_outline_generation_stage(self, project_id, outline):
+        self.stage_updates.append((project_id, outline))
+
+
+@pytest.mark.asyncio
+async def test_generate_outline_streaming_force_regenerate_skips_saved_outline(monkeypatch):
+    project = SimpleNamespace(
+        topic="fresh topic",
+        outline={
+            "title": "cached",
+            "slides": [{"page_number": 1, "title": "cached"}],
+            "metadata": {"generated_with_file": True},
+        },
+        confirmed_requirements={"content_source": "file"},
+        project_metadata={},
+        todo_board=None,
+        updated_at=0,
+    )
+    stub = _OutlineStreamingFreshGenerationStubService(project)
+    service = ProjectOutlineStreamingService(stub)
+    extract_calls = []
+
+    def _fake_extract_saved_file_outline(project_outline, confirmed_requirements, ignore_saved_outline=False):
+        extract_calls.append(ignore_saved_outline)
+        return None
+
+    async def _fake_run_streaming_outline_research(project_id, current_project, confirmed_requirements, network_mode):
+        yield {
+            "outline": {
+                "title": "fresh",
+                "slides": [{"page_number": 1, "title": "fresh"}],
+                "metadata": {"generated_with_file": True},
+            },
+            "llm_call_count": 0,
+        }
+
+    class _FakeDatabaseProjectManager:
+        async def save_project_outline(self, project_id, outline):
+            return True
+
+    monkeypatch.setattr(
+        "landppt.services.file_outline_utils.should_force_file_outline_regeneration",
+        lambda confirmed_requirements: False,
+    )
+    monkeypatch.setattr(
+        "landppt.services.file_outline_utils.extract_saved_file_outline",
+        _fake_extract_saved_file_outline,
+    )
+    monkeypatch.setattr(
+        "landppt.services.db_project_manager.DatabaseProjectManager",
+        _FakeDatabaseProjectManager,
+    )
+    monkeypatch.setattr(
+        service,
+        "_run_streaming_outline_research",
+        _fake_run_streaming_outline_research,
+        raising=False,
+    )
+
+    events = []
+    async for chunk in service.generate_outline_streaming("project-1", force_regenerate=True):
+        events.append(chunk)
+
+    assert extract_calls == [True]
+    assert stub.project_manager.status_updates == [("project-1", "in_progress")]
+    assert stub.stage_updates
+    assert project.outline["title"] == "fresh"
+    assert any('"done": true' in chunk for chunk in events)

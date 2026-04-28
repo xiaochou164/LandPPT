@@ -18,7 +18,7 @@ env_paths = [
 for env_path in env_paths:
     try:
         if os.path.exists(env_path):
-            load_dotenv(env_path, override=True)
+            load_dotenv(env_path, override=False)
             break
     except (PermissionError, FileNotFoundError):
         continue
@@ -435,7 +435,7 @@ def reload_ai_config():
         env_file = Path('.env')
 
     try:
-        load_dotenv(str(env_file), override=True)
+        load_dotenv(str(env_file), override=False)
     except (PermissionError, FileNotFoundError) as e:
         # Silently continue if .env file is not accessible
         pass

@@ -108,6 +108,15 @@
                 </a>
                 {% endif %}
 
+                {% if project.status in ['completed', 'in_progress'] %}
+                <button onclick="resetProjectProgress('requirements_confirmation')" class="btn btn-secondary action-button">
+                    重置到需求确认
+                </button>
+                <button onclick="resetProjectProgress('outline_generation')" class="btn btn-secondary action-button">
+                    重置到大纲生成
+                </button>
+                {% endif %}
+
                 <button onclick="archiveProject()" class="btn btn-warning action-button">
                     归档项目
                 </button>

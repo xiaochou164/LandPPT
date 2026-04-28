@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -30,6 +31,7 @@ class FakePPTService:
         self.project_manager = FakeProjectManager(project, raise_on_update=raise_on_update)
         self.reset_result = reset_result
         self.reset_calls = []
+        self.start_calls = []
         self.cleared_project_ids = []
 
     async def reset_stages_from(self, project_id: str, stage_id: str, user_id=None):
@@ -41,6 +43,16 @@ class FakePPTService:
             }
         )
         return self.reset_result
+
+    async def start_workflow_from_stage(self, project_id: str, stage_id: str, user_id=None):
+        self.start_calls.append(
+            {
+                "project_id": project_id,
+                "stage_id": stage_id,
+                "user_id": user_id,
+            }
+        )
+        return True
 
     def clear_cached_style_genes(self, project_id: str):
         self.cleared_project_ids.append(project_id)
@@ -144,3 +156,104 @@ def test_restart_ppt_generation_legacy_and_current_routes_both_registered():
 
     assert "/projects/{project_id}/restart-ppt-generation" in post_paths
     assert "/projects/{project_id}/restart-ppt-generation-entry" in post_paths
+    assert "/projects/{project_id}/reset-progress" in post_paths
+
+
+@pytest.mark.asyncio
+async def test_reset_project_progress_success(monkeypatch):
+    from landppt.api import landppt_api
+
+    project = SimpleNamespace(project_metadata={"keep_me": "value"})
+    service = FakePPTService(project, reset_result=True)
+    monkeypatch.setattr(landppt_api, "get_ppt_service_for_user", lambda _uid: service)
+
+    class _FakeRequest:
+        async def json(self):
+            return {"target_stage": "outline_generation"}
+
+    result = await landppt_api.reset_project_progress(
+        "proj-reset",
+        request=_FakeRequest(),
+        user=SimpleNamespace(id=21),
+    )
+
+    assert result == {
+        "status": "success",
+        "message": "项目进度已重置到大纲生成",
+        "project_id": "proj-reset",
+        "target_stage": "outline_generation",
+        "next_url": "/projects/proj-reset/todo",
+    }
+    assert service.reset_calls == [
+        {"project_id": "proj-reset", "stage_id": "outline_generation", "user_id": 21}
+    ]
+    assert service.start_calls == []
+
+
+@pytest.mark.asyncio
+async def test_reset_project_progress_rejects_invalid_target_stage(monkeypatch):
+    from landppt.api import landppt_api
+
+    service = FakePPTService(SimpleNamespace(project_metadata={}), reset_result=True)
+    monkeypatch.setattr(landppt_api, "get_ppt_service_for_user", lambda _uid: service)
+
+    class _FakeRequest:
+        async def json(self):
+            return {"target_stage": "ppt_creation"}
+
+    with pytest.raises(HTTPException) as excinfo:
+        await landppt_api.reset_project_progress(
+            "proj-reset-invalid",
+            request=_FakeRequest(),
+            user=SimpleNamespace(id=22),
+        )
+
+    assert excinfo.value.status_code == 422
+    assert excinfo.value.detail == "Unsupported target stage"
+    assert service.reset_calls == []
+
+
+@pytest.mark.asyncio
+async def test_reset_project_progress_rejects_malformed_json(monkeypatch):
+    from landppt.api import landppt_api
+
+    service = FakePPTService(SimpleNamespace(project_metadata={}), reset_result=True)
+    monkeypatch.setattr(landppt_api, "get_ppt_service_for_user", lambda _uid: service)
+
+    class _FakeRequest:
+        async def json(self):
+            raise json.JSONDecodeError("Expecting value", "{", 0)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await landppt_api.reset_project_progress(
+            "proj-reset-bad-json",
+            request=_FakeRequest(),
+            user=SimpleNamespace(id=23),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "Malformed JSON body"
+    assert service.reset_calls == []
+
+
+@pytest.mark.asyncio
+async def test_reset_project_progress_requires_target_stage(monkeypatch):
+    from landppt.api import landppt_api
+
+    service = FakePPTService(SimpleNamespace(project_metadata={}), reset_result=True)
+    monkeypatch.setattr(landppt_api, "get_ppt_service_for_user", lambda _uid: service)
+
+    class _FakeRequest:
+        async def json(self):
+            return {}
+
+    with pytest.raises(HTTPException) as excinfo:
+        await landppt_api.reset_project_progress(
+            "proj-reset-missing-stage",
+            request=_FakeRequest(),
+            user=SimpleNamespace(id=24),
+        )
+
+    assert excinfo.value.status_code == 422
+    assert excinfo.value.detail == "Target stage is required"
+    assert service.reset_calls == []

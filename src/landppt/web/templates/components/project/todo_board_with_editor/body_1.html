@@ -15,6 +15,26 @@
                     </div>
                 </div>
                 <div class="header-controls">
+                    {% if project and project.status in ['completed', 'in_progress'] %}
+                    <button
+                        type="button"
+                        class="btn btn-warning"
+                        data-action="reset-requirements"
+                        onclick="resetProjectProgress('requirements_confirmation')"
+                    >
+                        <i class="fas fa-rotate-left"></i>
+                        重置到需求确认
+                    </button>
+                    <button
+                        type="button"
+                        class="btn btn-light"
+                        data-action="reset-outline"
+                        onclick="resetProjectProgress('outline_generation')"
+                    >
+                        <i class="fas fa-list-check"></i>
+                        重置到大纲生成
+                    </button>
+                    {% endif %}
                     <a href="/projects" class="btn btn-outline-light" onclick="return true;">
                         <i class="fas fa-arrow-left"></i>
                         返回项目列表

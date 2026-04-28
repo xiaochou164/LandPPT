@@ -391,12 +391,20 @@ class DatabaseProjectManager:
     
     async def update_project_metadata(self, project_id: str, metadata: Dict[str, Any], user_id: Optional[int] = None) -> bool:
         """Update project metadata. If user_id is provided, enforces ownership."""
+        return await self.update_project_data(
+            project_id,
+            {"project_metadata": metadata},
+            user_id=user_id,
+        )
+
+    async def update_project_data(self, project_id: str, update_data: Dict[str, Any], user_id: Optional[int] = None) -> bool:
+        """Update arbitrary project fields. If user_id is provided, enforces ownership."""
         db_service = await self._get_db_service()
         try:
-            success = await db_service.project_repo.update(project_id, {"project_metadata": metadata}, user_id=user_id)
+            success = await db_service.project_repo.update(project_id, update_data, user_id=user_id)
 
             if success:
-                logger.info(f"Updated metadata for project {project_id}")
+                logger.info(f"Updated project data for project {project_id}: {sorted(update_data.keys())}")
 
             return success
         finally:

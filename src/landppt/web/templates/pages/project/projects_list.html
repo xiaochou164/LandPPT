@@ -581,6 +581,26 @@
                     {% if project.status in ['completed', 'in_progress'] %}
                     <button
                         type="button"
+                        class="action-btn js-reset-progress-btn"
+                        data-action="reset-requirements"
+                        data-target-stage="requirements_confirmation"
+                        data-project-id="{{ project.project_id }}"
+                        title="重置到需求确认"
+                    >
+                        重置到需求确认
+                    </button>
+                    <button
+                        type="button"
+                        class="action-btn js-reset-progress-btn"
+                        data-action="reset-outline"
+                        data-target-stage="outline_generation"
+                        data-project-id="{{ project.project_id }}"
+                        title="重置到大纲生成"
+                    >
+                        重置到大纲生成
+                    </button>
+                    <button
+                        type="button"
                         class="action-btn js-restart-ppt-btn"
                         data-action="restart-ppt"
                         data-project-id="{{ project.project_id }}"
@@ -811,6 +831,39 @@ async function restartPPTGeneration(projectId, projectTitle) {
     }
 }
 
+async function resetProjectProgress(projectId, projectTitle, targetStage) {
+    const stageLabels = {
+        requirements_confirmation: '需求确认',
+        outline_generation: '大纲生成'
+    };
+    const stageLabel = stageLabels[targetStage] || targetStage;
+    const confirmMessage = `确定要将项目「${projectTitle}」重置到「${stageLabel}」吗？\n\n这会清理该阶段之后的生成结果，但不会自动重新启动流程。`;
+    if (!window.confirm(confirmMessage)) {
+        return;
+    }
+
+    setLoadingOverlay(`正在重置到${stageLabel}...`);
+    try {
+        const response = await fetch(`/api/projects/${projectId}/reset-progress`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target_stage: targetStage })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.detail || payload.message || '重置失败');
+        }
+
+        showNotification(payload.message || `已重置到${stageLabel}`, 'success');
+        setTimeout(() => {
+            window.location.href = payload.next_url || `/projects/${projectId}/todo`;
+        }, 500);
+    } catch (error) {
+        hideLoadingOverlay();
+        showNotification('重置失败：' + error.message, 'error');
+    }
+}
+
 function showNotification(message, type = 'info') {
     const notification = document.createElement('div');
     const colors = { success: '#16a34a', error: '#dc2626', info: '#2563eb' };
@@ -831,6 +884,21 @@ function showNotification(message, type = 'info') {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('button[data-action="reset-requirements"], button[data-action="reset-outline"]').forEach((button) => {
+        button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const projectId = button.dataset.projectId;
+            const targetStage = button.dataset.targetStage;
+            if (!projectId || !targetStage) {
+                showNotification('重置失败：缺少项目信息', 'error');
+                return;
+            }
+            const row = button.closest('.project-list-item');
+            const projectTitle = row?.querySelector('.project-title')?.textContent?.trim() || '该项目';
+            resetProjectProgress(projectId, projectTitle, targetStage);
+        });
+    });
+
     document.querySelectorAll('button[data-action="restart-ppt"]:not(.js-delete-project-btn)').forEach((button) => {
         button.addEventListener('click', (event) => {
             event.stopPropagation();

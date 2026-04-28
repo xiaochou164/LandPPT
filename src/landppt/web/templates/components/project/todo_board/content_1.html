@@ -263,6 +263,27 @@
             查看项目详情
         </a>
 
+        {% if project and project.status in ['completed', 'in_progress'] %}
+        <button
+            type="button"
+            class="btn"
+            data-action="reset-requirements"
+            onclick="resetProjectProgress('requirements_confirmation')"
+            style="background: #f59e0b; color: #111827; border: none; padding: 10px 20px; border-radius: 10px; font-weight: 600; font-size: 0.9em;"
+        >
+            重置到需求确认
+        </button>
+        <button
+            type="button"
+            class="btn"
+            data-action="reset-outline"
+            onclick="resetProjectProgress('outline_generation')"
+            style="background: #fcd34d; color: #111827; border: none; padding: 10px 20px; border-radius: 10px; font-weight: 600; font-size: 0.9em;"
+        >
+            重置到大纲生成
+        </button>
+        {% endif %}
+
         {% if project and project.slides_data and project.slides_data|length > 0 %}
         <a href="/projects/{{ todo_board.task_id }}/preview" target="_blank"
             style="background: #1f2a37; color: var(--surface); text-decoration: none; padding: 10px 20px; border-radius: 10px; font-weight: 600; transition: all 0.3s ease; display: flex; align-items: center; gap: 6px; font-size: 0.9em;"

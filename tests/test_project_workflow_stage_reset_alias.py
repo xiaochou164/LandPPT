@@ -33,13 +33,14 @@ class FakeDbProjectManager:
         self.updated_stages = []
         self.saved_outlines = []
         self.saved_slides = []
+        self.updated_project_data = []
 
-    async def update_project_status(self, project_id: str, status: str):
-        self.updated_status.append((project_id, status))
+    async def update_project_status(self, project_id: str, status: str, user_id=None):
+        self.updated_status.append((project_id, status, user_id))
         return True
 
-    async def update_stage_status(self, project_id: str, stage_id: str, status: str, progress: float, result):
-        self.updated_stages.append((project_id, stage_id, status, progress, result))
+    async def update_stage_status(self, project_id: str, stage_id: str, status: str, progress: float, result, user_id=None):
+        self.updated_stages.append((project_id, stage_id, status, progress, result, user_id))
         return True
 
     async def save_project_outline(self, project_id: str, outline):
@@ -48,6 +49,10 @@ class FakeDbProjectManager:
 
     async def save_project_slides(self, project_id: str, slides_html: str, slides_data):
         self.saved_slides.append((project_id, slides_html, slides_data))
+        return True
+
+    async def update_project_data(self, project_id: str, update_data, user_id=None):
+        self.updated_project_data.append((project_id, update_data, user_id))
         return True
 
 
@@ -113,13 +118,15 @@ async def test_reset_stages_from_accepts_legacy_anchor_when_ppt_creation_not_pre
     assert project.slides_html is None
     assert project.slides_data is None
 
-    assert db_manager.updated_status == [("proj-legacy", "in_progress")]
+    assert project.status == "in_progress"
+    assert db_manager.updated_status == [("proj-legacy", "in_progress", 1)]
     assert [item[1] for item in db_manager.updated_stages] == [
         "theme_design",
         "content_generation",
         "layout_verification",
         "export_output",
     ]
+    assert all(item[5] == 1 for item in db_manager.updated_stages)
     assert db_manager.saved_outlines == []
     assert db_manager.saved_slides == [("proj-legacy", "", [])]
 
@@ -171,7 +178,166 @@ async def test_reset_stages_from_succeeds_without_manager_calculate_overall_prog
     assert project.slides_html is None
     assert project.slides_data is None
 
-    assert db_manager.updated_status == [("proj-no-calc", "in_progress")]
+    assert project.status == "in_progress"
+    assert db_manager.updated_status == [("proj-no-calc", "in_progress", 1)]
     assert [item[1] for item in db_manager.updated_stages] == ["ppt_creation"]
+    assert all(item[5] == 1 for item in db_manager.updated_stages)
     assert db_manager.saved_outlines == []
     assert db_manager.saved_slides == [("proj-no-calc", "", [])]
+
+
+@pytest.mark.asyncio
+async def test_reset_stages_from_requirements_confirmation_clears_downstream_state_and_metadata(monkeypatch):
+    db_manager = FakeDbProjectManager()
+
+    class _FakeDbManagerFactory:
+        def __new__(cls):
+            return db_manager
+
+    monkeypatch.setattr("landppt.services.db_project_manager.DatabaseProjectManager", _FakeDbManagerFactory)
+
+    stages = [
+        _make_stage("requirements_confirmation"),
+        _make_stage("outline_generation"),
+        _make_stage("ppt_creation"),
+    ]
+
+    project = SimpleNamespace(
+        todo_board=SimpleNamespace(
+            stages=stages,
+            current_stage_index=2,
+            overall_progress=100.0,
+            updated_at=0.0,
+        ),
+        confirmed_requirements={"audience": "exec"},
+        outline={"slides": [{"title": "s1"}]},
+        slides_html="<html>slides</html>",
+        slides_data=[{"title": "slide"}],
+        project_metadata={
+            "selected_global_template_id": "tpl-1",
+            "template_mode": "free",
+            "free_template_html": "<section></section>",
+            "free_template_status": "ready",
+            "keep_me": "value",
+        },
+        updated_at=0.0,
+    )
+
+    cache_clear_calls = []
+    workflow = ProjectWorkflowStageService(
+        SimpleNamespace(
+            project_manager=FakeProjectManager(project),
+            clear_cached_style_genes=lambda project_id: cache_clear_calls.append(project_id),
+            _free_template_generation_locks={"proj-reset": object()},
+            _slide_generation_locks={"proj-reset": object()},
+            _active_slide_generations={"proj-reset": True},
+        )
+    )
+
+    success = await workflow.reset_stages_from("proj-reset", "requirements_confirmation", user_id=12)
+
+    assert success is True
+    assert project.todo_board.current_stage_index == 0
+    assert [stage.status for stage in project.todo_board.stages] == [
+        "pending",
+        "pending",
+        "pending",
+    ]
+    assert project.confirmed_requirements is None
+    assert project.outline is None
+    assert project.slides_html is None
+    assert project.slides_data is None
+    assert project.project_metadata == {"keep_me": "value"}
+    assert cache_clear_calls == ["proj-reset"]
+    assert workflow._free_template_generation_locks == {}
+    assert workflow._slide_generation_locks == {}
+    assert workflow._active_slide_generations == {}
+
+    assert project.status == "in_progress"
+    assert db_manager.updated_status == [("proj-reset", "in_progress", 12)]
+    assert [item[1] for item in db_manager.updated_stages] == [
+        "requirements_confirmation",
+        "outline_generation",
+        "ppt_creation",
+    ]
+    assert all(item[5] == 12 for item in db_manager.updated_stages)
+    assert db_manager.saved_outlines == [("proj-reset", None)]
+    assert db_manager.saved_slides == [("proj-reset", "", [])]
+    assert db_manager.updated_project_data == [
+        (
+            "proj-reset",
+            {
+                "confirmed_requirements": None,
+                "project_metadata": {"keep_me": "value"},
+            },
+            12,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reset_stages_from_outline_generation_clears_template_metadata(monkeypatch):
+    db_manager = FakeDbProjectManager()
+
+    class _FakeDbManagerFactory:
+        def __new__(cls):
+            return db_manager
+
+    monkeypatch.setattr("landppt.services.db_project_manager.DatabaseProjectManager", _FakeDbManagerFactory)
+
+    stages = [
+        _make_stage("requirements_confirmation"),
+        _make_stage("outline_generation"),
+        _make_stage("ppt_creation"),
+    ]
+
+    project = SimpleNamespace(
+        status="completed",
+        todo_board=SimpleNamespace(
+            stages=stages,
+            current_stage_index=2,
+            overall_progress=100.0,
+            updated_at=0.0,
+        ),
+        confirmed_requirements={"audience": "exec"},
+        outline={"slides": [{"title": "s1"}]},
+        slides_html="<html>slides</html>",
+        slides_data=[{"title": "slide"}],
+        project_metadata={
+            "selected_global_template_id": "tpl-1",
+            "template_mode": "free",
+            "free_template_html": "<section></section>",
+            "free_template_status": "ready",
+            "keep_me": "value",
+        },
+        updated_at=0.0,
+    )
+
+    workflow = ProjectWorkflowStageService(
+        SimpleNamespace(project_manager=FakeProjectManager(project))
+    )
+
+    success = await workflow.reset_stages_from("proj-outline-reset", "outline_generation", user_id=44)
+
+    assert success is True
+    assert project.status == "in_progress"
+    assert project.confirmed_requirements == {"audience": "exec"}
+    assert project.outline is None
+    assert project.slides_html is None
+    assert project.slides_data is None
+    assert project.project_metadata == {"keep_me": "value"}
+    assert db_manager.updated_status == [("proj-outline-reset", "in_progress", 44)]
+    assert [item[1] for item in db_manager.updated_stages] == [
+        "outline_generation",
+        "ppt_creation",
+    ]
+    assert all(item[5] == 44 for item in db_manager.updated_stages)
+    assert db_manager.saved_outlines == [("proj-outline-reset", None)]
+    assert db_manager.saved_slides == [("proj-outline-reset", "", [])]
+    assert db_manager.updated_project_data == [
+        (
+            "proj-outline-reset",
+            {"project_metadata": {"keep_me": "value"}},
+            44,
+        )
+    ]

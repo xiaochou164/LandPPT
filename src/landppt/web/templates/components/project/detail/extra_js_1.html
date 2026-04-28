@@ -63,6 +63,40 @@
             }
         }
 
+        async function resetProjectProgress(targetStage) {
+            const stageLabels = {
+                requirements_confirmation: '需求确认',
+                outline_generation: '大纲生成'
+            };
+            const stageLabel = stageLabels[targetStage] || targetStage;
+            const confirmed = confirm(`确定要将当前项目重置到「${stageLabel}」吗？\n\n系统会清理后续生成结果，但不会自动重新启动流程。`);
+            if (!confirmed) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/projects/${projectId}/reset-progress`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ target_stage: targetStage })
+                });
+
+                const result = await response.json().catch(() => ({}));
+
+                if (!response.ok) {
+                    throw new Error(result.detail || result.message || '重置失败');
+                }
+
+                alert(result.message || `已重置到${stageLabel}`);
+                window.location.href = result.next_url || `/projects/${projectId}/todo`;
+            } catch (error) {
+                console.error('Error resetting project progress:', error);
+                alert('重置失败: ' + error.message);
+            }
+        }
+
         // 大纲视图切换
         let isDetailView = false;
 

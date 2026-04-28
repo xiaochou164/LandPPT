@@ -9,6 +9,7 @@ from ..auth.middleware import get_current_user_required
 from ..database.models import User
 import uuid
 import json
+from json import JSONDecodeError
 import logging
 import re
 
@@ -532,6 +533,58 @@ async def continue_from_stage(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error continuing from stage: {str(e)}")
+
+
+RESET_PROGRESS_STAGE_LABELS = {
+    "requirements_confirmation": "需求确认",
+    "outline_generation": "大纲生成",
+}
+
+
+@router.post("/projects/{project_id}/reset-progress")
+async def reset_project_progress(
+    project_id: str,
+    request: Request,
+    user: User = Depends(get_current_user_required)
+):
+    """Reset a project back to an earlier workflow stage without auto-starting generation."""
+    try:
+        body = await request.json()
+    except JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Malformed JSON body")
+    except Exception:
+        logger.exception("Error parsing reset project progress body for project_id=%s", project_id)
+        raise HTTPException(status_code=500, detail="Failed to reset project progress")
+
+    try:
+        target_stage = body.get("target_stage")
+
+        if not target_stage:
+            raise HTTPException(status_code=422, detail="Target stage is required")
+        if target_stage not in RESET_PROGRESS_STAGE_LABELS:
+            raise HTTPException(status_code=422, detail="Unsupported target stage")
+
+        user_ppt_service = get_ppt_service_for_user(user.id)
+        project = await user_ppt_service.project_manager.get_project(project_id, user_id=user.id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        success = await user_ppt_service.reset_stages_from(project_id, target_stage, user_id=user.id)
+        if not success:
+            raise HTTPException(status_code=400, detail="Failed to reset project progress")
+
+        return {
+            "status": "success",
+            "message": f"项目进度已重置到{RESET_PROGRESS_STAGE_LABELS[target_stage]}",
+            "project_id": project_id,
+            "target_stage": target_stage,
+            "next_url": f"/projects/{project_id}/todo",
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error resetting project progress for project_id=%s", project_id)
+        raise HTTPException(status_code=500, detail="Failed to reset project progress")
 
 
 @router.post("/projects/{project_id}/restart-ppt-generation")

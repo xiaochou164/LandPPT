@@ -19,6 +19,89 @@
     );
     const projectLanguage = hasProjectLanguage ? projectMetadata.language.trim() : null;
     let outlineStreamPretextRendererFactoryPromise = null;
+    const currentProjectTitle = {{ ((project.title if project and project.title else todo_board.title) or '该项目') | tojson }};
+
+    function getProjectActionOverlay() {
+        let overlay = document.getElementById('todoBoardActionLoadingOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'todoBoardActionLoadingOverlay';
+            overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(15,23,42,0.42);backdrop-filter:blur(4px);z-index:3000;align-items:center;justify-content:center;padding:24px;';
+            overlay.innerHTML = `
+                <div style="max-width:360px;width:100%;background:#fff;border-radius:16px;padding:24px;text-align:center;box-shadow:0 20px 45px rgba(15,23,42,0.18);">
+                    <div style="width:32px;height:32px;margin:0 auto 14px;border:3px solid rgba(17,24,39,0.15);border-top-color:#111827;border-radius:50%;animation:spin 0.9s linear infinite;"></div>
+                    <p id="todoBoardActionLoadingMessage" style="margin:0;color:#111827;font-weight:600;">处理中...</p>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+        }
+        return overlay;
+    }
+
+    function setProjectActionLoading(message) {
+        const overlay = getProjectActionOverlay();
+        const messageEl = document.getElementById('todoBoardActionLoadingMessage');
+        if (messageEl) {
+            messageEl.textContent = message || '处理中...';
+        }
+        overlay.style.display = 'flex';
+    }
+
+    function hideProjectActionLoading() {
+        const overlay = document.getElementById('todoBoardActionLoadingOverlay');
+        if (overlay) {
+            overlay.style.display = 'none';
+        }
+    }
+
+    function showProjectActionNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        const colors = { success: '#16a34a', error: '#dc2626', info: '#2563eb' };
+        notification.style.cssText = `position:fixed;top:24px;right:24px;padding:12px 18px;border-radius:12px;color:#fff;z-index:3001;max-width:360px;box-shadow:0 12px 30px rgba(15,23,42,0.2);font-weight:600;font-size:0.9rem;transform:translateX(120%);transition:transform 0.25s ease;background:${colors[type] || colors.info};`;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        setTimeout(() => {
+            notification.style.transform = 'translateX(0)';
+        }, 20);
+        setTimeout(() => {
+            notification.style.transform = 'translateX(120%)';
+            setTimeout(() => notification.remove(), 250);
+        }, 2600);
+    }
+
+    async function resetProjectProgress(targetStage) {
+        const projectId = currentProjectId;
+        const stageLabels = {
+            requirements_confirmation: '需求确认',
+            outline_generation: '大纲生成'
+        };
+        const stageLabel = stageLabels[targetStage] || targetStage;
+        const confirmMessage = `确定要将项目「${currentProjectTitle}」重置到「${stageLabel}」吗？\n\n这会清理该阶段之后的生成结果，但不会自动重新启动流程。`;
+        if (!window.confirm(confirmMessage)) {
+            return;
+        }
+
+        setProjectActionLoading(`正在重置到${stageLabel}...`);
+        try {
+            const response = await fetch(`/api/projects/${projectId}/reset-progress`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ target_stage: targetStage })
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload.detail || payload.message || '重置失败');
+            }
+
+            showProjectActionNotification(payload.message || `已重置到${stageLabel}`, 'success');
+            setTimeout(() => {
+                window.location.href = payload.next_url || `/projects/${projectId}/todo`;
+            }, 500);
+        } catch (error) {
+            hideProjectActionLoading();
+            showProjectActionNotification('重置失败：' + error.message, 'error');
+        }
+    }
 
     async function loadOutlineStreamPretextRendererFactory() {
         if (!outlineStreamPretextRendererFactoryPromise) {

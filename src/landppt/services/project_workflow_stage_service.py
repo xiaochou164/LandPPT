@@ -692,16 +692,36 @@ class ProjectWorkflowStageService:
                 # Recalculate overall progress
                 project.todo_board.overall_progress = self._calculate_overall_progress(project.todo_board.stages)
                 project.todo_board.updated_at = time.time()
+                project.status = "in_progress"
 
+                reset_requirements = requested_stage_id == "requirements_confirmation" or stage_id == "requirements_confirmation"
                 reset_outline = requested_stage_id == "outline_generation" or stage_id == "outline_generation"
                 reset_ppt_only = (
                     requested_stage_id == "ppt_creation"
                     or stage_id == "ppt_creation"
                     or stage_id in legacy_ppt_stage_ids
                 )
+                should_clear_template_metadata = reset_requirements or reset_outline
+                template_metadata_keys = (
+                    "selected_global_template_id",
+                    "template_mode",
+                    "free_template_html",
+                    "free_template_name",
+                    "free_template_generated_at",
+                    "free_template_prompt",
+                    "free_template_error",
+                    "free_template_status",
+                    "free_template_confirmed",
+                    "free_template_confirmed_at",
+                )
 
                 # Clear related project data based on the stage being reset
-                if reset_outline:
+                if reset_requirements:
+                    project.confirmed_requirements = None
+                    project.outline = None
+                    project.slides_html = None
+                    project.slides_data = None
+                elif reset_outline:
                     # Reset outline and all subsequent data
                     project.outline = None
                     project.slides_html = None
@@ -711,7 +731,34 @@ class ProjectWorkflowStageService:
                     project.slides_html = None
                     project.slides_data = None
 
+                if should_clear_template_metadata:
+                    metadata = dict(getattr(project, "project_metadata", None) or {})
+                    for key in template_metadata_keys:
+                        metadata.pop(key, None)
+                    project.project_metadata = metadata
+
                 project.updated_at = time.time()
+
+                try:
+                    self.clear_cached_style_genes(project_id)
+                except Exception:
+                    logger.debug("Failed to clear cached style genes for project %s", project_id, exc_info=True)
+
+                for attr in (
+                    "_free_template_generation_locks",
+                    "_slide_generation_locks",
+                    "_active_slide_generations",
+                    "_slides_generation_cancel_flags",
+                ):
+                    mapping = getattr(self, attr, None)
+                    if isinstance(mapping, dict):
+                        mapping.pop(project_id, None)
+
+                slides_task_map = getattr(self, "_slides_generation_tasks", None)
+                if isinstance(slides_task_map, dict):
+                    task = slides_task_map.pop(project_id, None)
+                    if isinstance(task, asyncio.Task) and not task.done():
+                        task.cancel()
 
                 # 保存重置后的项目状态到数据库
                 try:
@@ -719,7 +766,15 @@ class ProjectWorkflowStageService:
                     db_manager = DatabaseProjectManager()
 
                     # 更新项目状态
-                    await db_manager.update_project_status(project_id, "in_progress")
+                    await db_manager.update_project_status(project_id, "in_progress", user_id=user_id)
+
+                    project_update_data = {}
+                    if reset_requirements:
+                        project_update_data["confirmed_requirements"] = None
+                    if should_clear_template_metadata:
+                        project_update_data["project_metadata"] = project.project_metadata
+                    if project_update_data and hasattr(db_manager, "update_project_data"):
+                        await db_manager.update_project_data(project_id, project_update_data, user_id=user_id)
 
                     # 重置相关阶段状态到数据库
                     for i in range(stage_index, len(project.todo_board.stages)):
@@ -729,11 +784,12 @@ class ProjectWorkflowStageService:
                             stage.id,
                             "pending",
                             0.0,
-                            None
+                            None,
+                            user_id=user_id,
                         )
 
                     # 如果重置了大纲生成阶段，清除数据库中的大纲和幻灯片数据
-                    if reset_outline:
+                    if reset_requirements or reset_outline:
                         # 清除大纲数据
                         await db_manager.save_project_outline(project_id, None)
                         # 清除幻灯片数据

@@ -29,6 +29,11 @@ class RepairPrompts:
             page_count_instruction = "- 页数要求：保持现有页数和内容，仅修复错误"
 
         errors_text = '\n'.join(["- " + str(error) for error in validation_errors])
+        transition_instruction = (
+            "- 已开启章节过渡页：允许并保留 slide_type=\"transition\"，过渡页计入总页数。"
+            if confirmed_requirements.get("include_transition_pages")
+            else "- 未开启章节过渡页：不要新增 transition 类型页面。"
+        )
 
         return f"""作为专业的PPT大纲修复助手，请修复以下PPT大纲JSON数据中的错误。
 
@@ -55,6 +60,7 @@ class RepairPrompts:
 4. 严格遵守页数要求
 5. 确保所有必需字段都存在且格式正确
 6. 首尾页保持精简和聚焦，不要把普通内容页的要点密度直接套到这些页面
+7. {transition_instruction}
 
 请输出修复后的完整JSON数据，使用```json```代码块包裹："""
 

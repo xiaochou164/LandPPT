@@ -26,6 +26,7 @@ from ...ai.base import TextContent, ImageContent
 from ...core.config import ai_config, app_config
 from .ai_execution import ExecutionContext
 from ..prompts import prompts_manager
+from ..prompts.system_prompts import SystemPrompts
 from ..research.enhanced_research_service import EnhancedResearchService
 from ..research.enhanced_report_generator import EnhancedReportGenerator
 from ..pyppeteer_pdf_converter import get_pdf_converter
@@ -131,12 +132,14 @@ class RuntimeProviderService:
                 kwargs.setdefault('top_p', ai_config.top_p)
         system_prompt = str(kwargs.pop('system_prompt', '') or '').strip()
         if system_prompt:
+            system_prompt = SystemPrompts.with_cache_prefix(system_prompt)
             # 统一把 system_prompt 转成系统消息，避免上层传参后被静默忽略。
-            messages = [
+            messages = SystemPrompts.normalize_messages_for_cache([
                 AIMessage(role=MessageRole.SYSTEM, content=system_prompt),
                 AIMessage(role=MessageRole.USER, content=prompt),
-            ]
+            ])
             return await provider.chat_completion(messages=messages, **kwargs)
+        prompt = SystemPrompts.with_text_cache_prefix(prompt)
         if role == 'outline' and settings.get('provider') == 'anthropic':
             full_response = ''
             async for chunk in provider.stream_text_completion(prompt=prompt, **kwargs):
@@ -160,13 +163,15 @@ class RuntimeProviderService:
                 kwargs.setdefault('top_p', ai_config.top_p)
         system_prompt = str(kwargs.pop('system_prompt', '') or '').strip()
         if system_prompt:
-            messages = [
+            system_prompt = SystemPrompts.with_cache_prefix(system_prompt)
+            messages = SystemPrompts.normalize_messages_for_cache([
                 AIMessage(role=MessageRole.SYSTEM, content=system_prompt),
                 AIMessage(role=MessageRole.USER, content=prompt),
-            ]
+            ])
             async for chunk in provider.stream_chat_completion(messages=messages, **kwargs):
                 yield chunk
             return
+        prompt = SystemPrompts.with_text_cache_prefix(prompt)
         async for chunk in provider.stream_text_completion(prompt=prompt, **kwargs):
             yield chunk
 
@@ -183,4 +188,5 @@ class RuntimeProviderService:
             except Exception:
                 kwargs.setdefault('temperature', ai_config.temperature)
                 kwargs.setdefault('top_p', ai_config.top_p)
+        messages = SystemPrompts.normalize_messages_for_cache(messages)
         return await provider.chat_completion(messages=messages, **kwargs)

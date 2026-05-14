@@ -64,6 +64,17 @@ class SMTPConfigRequest(BaseModel):
     resend_from_email: str = ""
     resend_from_name: str = "LandPPT"
     test_email: Optional[str] = None  # For test endpoint
+    test_subject: Optional[str] = None  # Custom test email subject
+    test_content: Optional[str] = None  # Custom test email content
+
+
+class SMTPInviteTestRequest(BaseModel):
+    """Request body for sending test emails each containing a real invite code."""
+    test_emails: str              # comma / newline / semicolon separated
+    channel: str = "universal"    # github | linuxdo | mail | universal
+    credits_amount: int = 0
+    max_uses: int = 1
+    expires_in_days: Optional[int] = None
 
 
 class OAuthProviderSettings(BaseModel):
@@ -566,6 +577,26 @@ async def test_smtp_config(
     if not data.test_email:
         return {"success": False, "message": "请提供测试收件邮箱"}
 
+    default_subject = "LandPPT 测试邮件"
+    default_html = """
+    <html>
+    <body style="font-family: Arial, sans-serif; padding: 20px;">
+        <h2>🎉 邮件配置测试成功！</h2>
+        <p>如果您收到这封邮件，说明 LandPPT 的邮件服务已正确配置。</p>
+        <hr>
+        <p style="color: #666; font-size: 12px;">Copyright © 2026 LandPPT. All rights reserved.</p>
+    </body>
+    </html>
+    """
+    test_subject = (data.test_subject or "").strip() or default_subject
+    test_html = (data.test_content or "").strip()
+    if test_html:
+        # Wrap plain text in basic HTML if it doesn't look like HTML
+        if not test_html.strip().lower().startswith("<"):
+            test_html = f'<html><body style="font-family: Arial, sans-serif; padding: 20px;"><p>{test_html}</p></body></html>'
+    else:
+        test_html = default_html
+
     if provider == "resend":
         if not data.resend_api_key:
             return {"success": False, "message": "请填写 Resend API Key"}
@@ -586,17 +617,8 @@ async def test_smtp_config(
                 params: resend.Emails.SendParams = {
                     "from": from_value,
                     "to": [data.test_email],
-                    "subject": "LandPPT Resend 测试邮件",
-                    "html": """
-                    <html>
-                    <body style="font-family: Arial, sans-serif; padding: 20px;">
-                        <h2>🎉 Resend 配置测试成功！</h2>
-                        <p>如果您收到这封邮件，说明 LandPPT 的 Resend 邮件服务已正确配置。</p>
-                        <hr>
-                        <p style="color: #666; font-size: 12px;">此邮件由 LandPPT 管理后台发送</p>
-                    </body>
-                    </html>
-                    """,
+                    "subject": test_subject,
+                    "html": test_html,
                 }
                 return resend.Emails.send(params)
 
@@ -617,21 +639,11 @@ async def test_smtp_config(
 
     try:
         msg = MIMEMultipart('alternative')
-        msg['Subject'] = 'LandPPT SMTP 测试邮件'
+        msg['Subject'] = test_subject
         msg['From'] = f"{data.smtp_from_name} <{data.smtp_from_email or data.smtp_user}>"
         msg['To'] = data.test_email
 
-        html_content = """
-        <html>
-        <body style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2>🎉 SMTP 配置测试成功！</h2>
-            <p>如果您收到这封邮件，说明 LandPPT 的 SMTP 邮件服务已正确配置。</p>
-            <hr>
-            <p style="color: #666; font-size: 12px;">此邮件由 LandPPT 管理后台发送</p>
-        </body>
-        </html>
-        """
-        msg.attach(MIMEText(html_content, 'html', 'utf-8'))
+        msg.attach(MIMEText(test_html, 'html', 'utf-8'))
 
         if data.smtp_use_ssl:
             server = smtplib.SMTP_SSL(data.smtp_host, data.smtp_port, timeout=30)
@@ -656,6 +668,118 @@ async def test_smtp_config(
         return {"success": False, "message": f"SMTP 错误: {str(e)}"}
     except Exception as e:
         return {"success": False, "message": f"发送失败: {str(e)}"}
+
+
+@router.post("/api/smtp/test-invite")
+async def test_smtp_invite(
+    data: SMTPInviteTestRequest,
+    request: Request,
+    user: User = Depends(get_admin_user_required),
+):
+    """Create real invite codes and send each via email to verify the full flow."""
+    import time as _time
+    import re
+    from ..services.email_service import send_email
+
+    raw = (data.test_emails or "").strip()
+    if not raw:
+        return {"success": False, "message": "请提供至少一个收件邮箱"}
+
+    emails = [e.strip() for e in re.split(r'[,;\n\r]+', raw) if e.strip()]
+    if not emails:
+        return {"success": False, "message": "请提供至少一个收件邮箱"}
+    if len(emails) > 50:
+        return {"success": False, "message": "单次最多发送 50 封"}
+
+    expires_at = None
+    if data.expires_in_days and data.expires_in_days > 0:
+        expires_at = _time.time() + (data.expires_in_days * 86400)
+
+    try:
+        items = await community_service.create_invite_codes(
+            count=len(emails),
+            channel=data.channel,
+            credits_amount=max(0, data.credits_amount),
+            max_uses=max(1, data.max_uses),
+            created_by=user.id,
+            expires_at=expires_at,
+            description=f"邮件批量发送({len(emails)}封)",
+        )
+    except Exception as e:
+        logger.error(f"Failed to create invite codes for email test: {e}")
+        return {"success": False, "message": f"邀请码创建失败: {str(e)}"}
+
+    if not items or len(items) < len(emails):
+        return {"success": False, "message": "邀请码创建数量不足"}
+
+    channel_label = {
+        "github": "GitHub",
+        "linuxdo": "LinuxDo",
+        "mail": "邮箱注册",
+        "universal": "通用",
+    }.get((data.channel or "").strip().lower(), data.channel)
+
+    base_url = str(request.base_url).rstrip("/")
+
+    expires_text = ""
+    if expires_at:
+        from datetime import datetime, timezone
+        dt = datetime.fromtimestamp(expires_at, tz=timezone.utc)
+        expires_text = f'<p style="margin:6px 0; color:#1e293b;"><strong>过期时间：</strong>{dt.strftime("%Y-%m-%d %H:%M")} UTC</p>'
+
+    sent_ok = []
+    sent_fail = []
+    for email_addr, invite in zip(emails, items):
+        code = invite["code"]
+        register_url = f"{base_url}/auth/register?invite_code={code}"
+
+        html_content = f"""\
+<html>
+<body style="font-family: 'Segoe UI', Arial, sans-serif; background:#f8fafc; padding:0; margin:0;">
+  <div style="max-width:520px; margin:30px auto; background:#fff; border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,.08); overflow:hidden;">
+    <div style="background:#111111; padding:28px 32px;">
+      <h2 style="margin:0; color:#fff; font-size:22px;">🎉 LandPPT 邀请码</h2>
+      <p style="margin:8px 0 0; color:rgba(255,255,255,.7); font-size:14px;">您收到了一个注册邀请码</p>
+    </div>
+    <div style="padding:28px 32px;">
+      <div style="background:#f8fafc; border:2px dashed #333; border-radius:8px; padding:16px; text-align:center; margin-bottom:20px;">
+        <span style="font-size:26px; font-weight:700; letter-spacing:3px; color:#111111;">{code}</span>
+      </div>
+      <p style="margin:6px 0; color:#1e293b;"><strong>适用渠道：</strong>{channel_label}</p>
+      {expires_text}
+      <div style="text-align:center; margin:24px 0 8px;">
+        <a href="{register_url}" style="display:inline-block; background:#111111; color:#fff; text-decoration:none; padding:12px 32px; border-radius:8px; font-weight:600; font-size:15px;">立即注册</a>
+      </div>
+      <p style="text-align:center; margin:12px 0 0; font-size:12px; color:#94a3b8;">或复制链接：{register_url}</p>
+    </div>
+    <div style="background:#f8fafc; padding:14px 32px; text-align:center;">
+      <p style="margin:0; font-size:12px; color:#94a3b8;">Copyright © 2026 LandPPT. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>"""
+
+        subject = f"LandPPT 邀请码: {code}"
+        ok, msg = await send_email(email_addr, subject, html_content)
+        if ok:
+            sent_ok.append(email_addr)
+        else:
+            sent_fail.append(f"{email_addr}({msg})")
+
+    logger.info(f"Admin {user.username} batch invite-code email: {len(sent_ok)} ok, {len(sent_fail)} fail")
+
+    if sent_fail and not sent_ok:
+        return {"success": False, "message": f"全部发送失败: {'; '.join(sent_fail)}"}
+
+    parts = [f"成功 {len(sent_ok)} 封"]
+    if sent_fail:
+        parts.append(f"失败 {len(sent_fail)} 封: {'; '.join(sent_fail)}")
+    return {
+        "success": True,
+        "message": "，".join(parts),
+        "sent": len(sent_ok),
+        "failed": len(sent_fail),
+    }
 
 
 # User API endpoints

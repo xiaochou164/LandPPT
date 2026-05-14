@@ -844,6 +844,7 @@ async function exportTemplateAsPptxTemplate(templateId, triggerButton = null) {
         const fileName = `${sanitizeFileName(template.template_name || '模板')}_PPTX模板.pptx`;
         await exporter.exportToPptx(slideElementStream, {
             fileName,
+            autoEmbedFonts: true,
             svgAsVector: false,
             slideNotes
         });

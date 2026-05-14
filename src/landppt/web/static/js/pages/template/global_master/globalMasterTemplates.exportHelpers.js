@@ -1,5 +1,7 @@
 let domToPptxLoadPromise = null;
 const DOM_TO_PPTX_BUNDLE_PATH = '/static/js/dom-to-pptx.bundle.js';
+const DOM_TO_PPTX_BUNDLE_VERSION = '20260425-layer-clip-v21';
+const DOM_TO_PPTX_EXPECTED_PATCH_VERSION = '2026-04-25-layer-clip-v21';
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -35,7 +37,9 @@ function setButtonLoadingState(button, isLoading, loadingLabel = '处理中...')
 }
 
 function isDomToPptxReady() {
-    return Boolean(window.domToPptx && typeof window.domToPptx.exportToPptx === 'function');
+    const instance = window.domToPptx;
+    if (!instance || typeof instance.exportToPptx !== 'function') return false;
+    return String(instance.__landpptPatchVersion || '').trim() === DOM_TO_PPTX_EXPECTED_PATCH_VERSION;
 }
 
 async function loadDomToPptxBundle(force = false) {
@@ -48,7 +52,7 @@ async function loadDomToPptxBundle(force = false) {
 
     domToPptxLoadPromise = new Promise((resolve, reject) => {
         const script = document.createElement('script');
-        script.src = `${DOM_TO_PPTX_BUNDLE_PATH}?ts=${Date.now()}`;
+        script.src = `${DOM_TO_PPTX_BUNDLE_PATH}?v=${encodeURIComponent(DOM_TO_PPTX_BUNDLE_VERSION)}&ts=${Date.now()}`;
         script.async = true;
 
         let settled = false;

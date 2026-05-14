@@ -16,6 +16,7 @@ from ...ai.base import TextContent, ImageContent, MessageContentType
 from ...core.config import ai_config
 from ...database.service import DatabaseService
 from ...database.database import AsyncSessionLocal
+from ..prompts.system_prompts import SystemPrompts
 from ..prompts.template_prompts import TemplatePrompts
 
 # Configure logger for this module
@@ -94,18 +95,21 @@ class GlobalMasterTemplateService:
         provider, settings = await self._get_template_role_provider_async()
         if settings.get("model"):
             kwargs.setdefault("model", settings["model"])
+        prompt = SystemPrompts.with_text_cache_prefix(prompt)
         return await provider.text_completion(prompt=prompt, **kwargs)
 
     async def _chat_completion(self, *, messages: List[AIMessage], **kwargs):
         provider, settings = await self._get_template_role_provider_async()
         if settings.get("model"):
             kwargs.setdefault("model", settings["model"])
+        messages = SystemPrompts.normalize_messages_for_cache(messages)
         return await provider.chat_completion(messages=messages, **kwargs)
 
     async def _stream_text_completion(self, *, prompt: str, **kwargs):
         provider, settings = await self._get_template_role_provider_async()
         if settings.get("model"):
             kwargs.setdefault("model", settings["model"])
+        prompt = SystemPrompts.with_text_cache_prefix(prompt)
         if hasattr(provider, 'stream_text_completion'):
             async for chunk in provider.stream_text_completion(prompt=prompt, **kwargs):
                 yield chunk
@@ -117,6 +121,7 @@ class GlobalMasterTemplateService:
         provider, settings = await self._get_template_role_provider_async()
         if settings.get("model"):
             kwargs.setdefault("model", settings["model"])
+        messages = SystemPrompts.normalize_messages_for_cache(messages)
         if hasattr(provider, 'stream_chat_completion'):
             async for chunk in provider.stream_chat_completion(messages=messages, **kwargs):
                 yield chunk

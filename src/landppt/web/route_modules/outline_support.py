@@ -277,6 +277,7 @@ async def _prepare_uploaded_source_outline_request(
         fixed_pages=fixed_pages,
         ppt_style=ppt_style,
         custom_style_prompt=custom_style_prompt,
+        include_transition_pages=bool(confirmed_requirements.get("include_transition_pages", False)),
         file_processing_mode=file_processing_mode,
         content_analysis_depth=content_analysis_depth,
     )
@@ -444,6 +445,7 @@ async def _generate_outline_from_confirmed_sources(
         fixed_pages=fixed_pages,
         ppt_style=ppt_style,
         custom_style_prompt=custom_style_prompt,
+        include_transition_pages=bool(confirmed_requirements.get("include_transition_pages", False)),
         file_processing_mode=file_processing_mode,
         content_analysis_depth=content_analysis_depth,
     )
@@ -1065,6 +1067,7 @@ async def _process_url_sources_for_outline(
             fixed_pages=fixed_pages,
             ppt_style=ppt_style,
             custom_style_prompt=custom_style_prompt,
+            include_transition_pages=False,
             file_processing_mode=file_processing_mode,
             content_analysis_depth=content_analysis_depth,
         )
@@ -1277,6 +1280,7 @@ async def _process_uploaded_files_for_outline(
                 fixed_pages=fixed_pages,
                 ppt_style=ppt_style,
                 custom_style_prompt=custom_style_prompt,
+                include_transition_pages=False,
                 file_processing_mode=file_processing_mode,
                 content_analysis_depth=content_analysis_depth
             )

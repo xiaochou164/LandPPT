@@ -15,104 +15,80 @@
 {% set requirements_stage = todo_board.stages | selectattr('id', 'equalto', 'requirements_confirmation') | first %}
 {% if not requirements_stage or requirements_stage.status == 'pending' %}
 <div id="requirements-section" class="requirements-shell"
-    style="max-width: 900px; margin: 15px auto; background: var(--surface); border-radius: 16px; padding: 30px; box-shadow: var(--shadow-soft); border: 1px solid var(--glass-border);">
-    <div style="text-align: center; margin-bottom: 25px;">
-        <div
-            style="display: inline-block; background: var(--surface-contrast); color: var(--surface); padding: 12px 20px; border-radius: 40px; margin-bottom: 15px; box-shadow: none;">
-            <h3 style="margin: 0; font-weight: 600; font-size: 1.1em;">需求确认</h3>
+    style="max-width: 900px; margin: 15px auto; background: var(--surface); border-radius: 16px; padding: 32px; box-shadow: var(--shadow-soft); border: 1px solid var(--glass-border);">
+    <div class="req-header">
+        <div class="req-header-badge">
+            <h3>需求确认</h3>
         </div>
-        <p style="color: #7f8c8d; margin-bottom: 0; font-size: 1em; line-height: 1.5;">请确认以下信息，AI将根据您的确认生成定制化的PPT内容</p>
+        <p class="req-header-desc">请确认以下信息，AI 将根据您的需求生成定制化 PPT 内容</p>
     </div>
 
-    <!-- 直接显示需求表单，无需加载动画 -->
-    <form id="requirements-form" class="requirements-form-grid" style="text-align: left;" enctype="multipart/form-data">
+    <form id="requirements-form" class="requirements-form-grid" enctype="multipart/form-data">
 
-        <!-- Content Source Selection -->
-        <div class="requirements-card" style="margin-bottom: 20px;">
-            <label style="display: block; margin-bottom: 8px; color: #2c3e50; font-weight: bold;">内容来源选择</label>
+        <!-- 内容来源 -->
+        <div class="requirements-card req-field">
+            <label class="req-label">内容来源</label>
             <div class="source-option-grid" id="source-option-grid-todo">
-                <label class="source-option-item is-active" data-source-option="manual"
-                    style="display: flex; align-items: center; cursor: pointer;">
+                <label class="source-option-item is-active" data-source-option="manual">
                     <input type="radio" name="content_source" value="manual" checked
-                        onchange="toggleContentSourceTodo()" style="margin-right: 8px;">
+                        onchange="toggleContentSourceTodo()">
                     <span>手动输入主题</span>
                 </label>
-                <label class="source-option-item" data-source-option="file"
-                    style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="radio" name="content_source" value="file" onchange="toggleContentSourceTodo()"
-                        style="margin-right: 8px;">
+                <label class="source-option-item" data-source-option="file">
+                    <input type="radio" name="content_source" value="file" onchange="toggleContentSourceTodo()">
                     <span>从文件生成</span>
                 </label>
-                <label class="source-option-item" data-source-option="url"
-                    style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="radio" name="content_source" value="url" onchange="toggleContentSourceTodo()"
-                        style="margin-right: 8px;">
-                    <span>从单个或多个 URL 获取内容</span>
+                <label class="source-option-item" data-source-option="url">
+                    <input type="radio" name="content_source" value="url" onchange="toggleContentSourceTodo()">
+                    <span>从 URL 获取内容</span>
                 </label>
             </div>
         </div>
 
+        <!-- URL 输入区 -->
         <div id="url-input-section-todo" class="source-panel" style="display: none;">
-            <label style="display: block; margin-bottom: 8px; color: #2c3e50; font-weight: bold;">URL 列表</label>
+            <label class="req-label">URL 列表</label>
             <textarea id="url_sources_todo" name="content_urls"
                 placeholder="https://example.com/article-1&#10;https://example.com/article-2"></textarea>
-            <small id="url-sources-helper-todo" style="color: #7f8c8d; display: block; margin-top: 6px;">
-                支持网页 URL 和文件 URL（如 PDF/DOCX/TXT/MD/图片），每行一个或使用逗号分隔（最多 50 个）
+            <small id="url-sources-helper-todo" class="req-hint">
+                支持网页 URL 和文件 URL（如 PDF/DOCX/TXT/MD/图片），每行一个或逗号分隔，最多 50 个
             </small>
         </div>
 
-        <!-- File Upload Section (hidden by default) -->
-        <div id="file-upload-section-todo" class="source-panel"
-            style="display: none; margin-bottom: 20px; padding: 15px; background: var(--surface-subtle); border-radius: 8px; border: 1px solid var(--glass-border);">
-            <label style="display: block; margin-bottom: 8px; color: #2c3e50; font-weight: bold;">上传文件 (支持多文件)</label>
-            <input type="file" id="file_upload_todo" name="file_upload"
-                accept=".pdf,.docx,.txt,.md,.jpg,.jpeg,.png,.xlsx,.csv" multiple
-                style="width: 100%; padding: 8px; border: 1px dashed var(--border-color); background: var(--surface); border-radius: 6px;">
-            <small style="color: #7f8c8d; display: block; margin-top: 5px;">
-                支持同时选择多个文件 | 支持 PDF、DOCX、TXT、MD 等格式 | 单个文件最大 100MB
+        <!-- 文件上传区 -->
+        <div id="file-upload-section-todo" class="source-panel" style="display: none;">
+            <label class="req-label">上传文件<span class="req-label-desc">（支持多文件）</span></label>
+            <input type="file" id="file_upload_todo" name="file_upload" class="req-input"
+                accept=".pdf,.docx,.txt,.md,.jpg,.jpeg,.png,.xlsx,.csv" multiple>
+            <small class="req-hint">
+                支持同时选择多个文件 | PDF、DOCX、TXT、MD 等格式 | 单个文件最大 100MB
             </small>
 
-            <!-- Multiple Files List Display -->
+            <!-- 已选文件列表 -->
             <div id="selected-files-list-todo" style="margin-top: 10px; display: none;">
-                <div
-                    style="background: var(--surface); padding: 10px; border-radius: 6px; border: 1px solid var(--glass-border);">
-                    <div
-                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <strong style="color: #2c3e50;">已选择的文件：</strong>
-                        <button type="button" onclick="clearAllFiles()"
-                            style="padding: 4px 12px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
-                            清除所有
-                        </button>
+                <div class="req-file-list-wrap">
+                    <div class="req-file-list-header">
+                        <strong>已选择的文件：</strong>
+                        <button type="button" onclick="clearAllFiles()" class="req-file-clear-btn">清除所有</button>
                     </div>
-                    <div id="files-list-container-todo" style="max-height: 200px; overflow-y: auto;">
-                        <!-- Files will be listed here -->
-                    </div>
+                    <div id="files-list-container-todo" style="max-height: 200px; overflow-y: auto;"></div>
                 </div>
             </div>
 
-            <!-- File Processing Options -->
-            <div id="file-processing-options-todo"
-                style="margin-top: 15px; padding: 15px; background: white; border-radius: 8px; border: 1px solid #e9ecef; display: none;">
-                <h6 style="margin-bottom: 10px; color: #2c3e50;">文件处理选项</h6>
-
-                <div style="display: flex; flex-wrap: wrap; gap: 15px;">
-                    <!-- PDF专用处理方式选项 -->
-                    <div id="pdf-processing-mode-todo" style="display: none; flex: 1; min-width: 200px;">
-                        <label
-                            style="display: block; margin-bottom: 5px; color: #2c3e50; font-weight: normal;">处理方式：</label>
-                        <select name="file_processing_mode"
-                            style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            <!-- 文件处理选项 -->
+            <div id="file-processing-options-todo" class="req-file-options" style="display: none;">
+                <h6>文件处理选项</h6>
+                <div class="req-file-options-grid">
+                    <div id="pdf-processing-mode-todo" style="display: none;">
+                        <label>处理方式</label>
+                        <select name="file_processing_mode">
                             <option value="markitdown">标准处理 (MarkItDown)</option>
-                            <option value="magic_pdf">高质量处理 (Mineru)[提取图片]</option>
+                            <option value="magic_pdf">高质量处理 (Mineru) [提取图片]</option>
                         </select>
                     </div>
-
-                    <!-- 通用解析深度选项 -->
-                    <div style="flex: 1; min-width: 200px;">
-                        <label
-                            style="display: block; margin-bottom: 5px; color: #2c3e50; font-weight: normal;">解析深度：</label>
-                        <select name="content_analysis_depth"
-                            style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    <div>
+                        <label>解析深度</label>
+                        <select name="content_analysis_depth">
                             <option value="fast" selected>快速解析</option>
                             <option value="standard">标准解析</option>
                             <option value="deep">深度解析</option>
@@ -122,130 +98,121 @@
             </div>
         </div>
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+        <div class="req-divider"></div>
+
+        <!-- 主题 + 受众 -->
+        <div class="req-row req-field">
             <div>
-                <label style="display: block; margin-bottom: 8px; color: #2c3e50; font-weight: bold;">主题 (Topic)</label>
-                <input type="text" id="topic" name="topic"
+                <label class="req-label" for="topic">主题</label>
+                <input type="text" id="topic" name="topic" class="req-input"
                     value="{{ todo_board.title.split(' - ')[0] if ' - ' in todo_board.title else todo_board.title }}"
-                    style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px;"
                     required>
-                <small
-                    style="color: #7f8c8d; font-size: 12px; margin-top: 5px; display: block;">文件上传时可留空，将自动从文件提取标题</small>
+                <small class="req-hint">文件上传时可留空，将自动从文件提取标题</small>
             </div>
             <div>
-                <label style="display: block; margin-bottom: 8px; color: #2c3e50; font-weight: bold;">目标受众 (Target
-                    Audience)</label>
-                <div style="margin-bottom: 10px;">
-                    <select id="audience_type" name="audience_type"
-                        style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px;"
-                        onchange="toggleCustomAudience()" required>
-                        <option value="">请选择目标受众</option>
-                        <option value="企业管理层">企业管理层</option>
-                        <option value="技术团队">技术团队</option>
-                        <option value="销售团队">销售团队</option>
-                        <option value="学生群体">学生群体</option>
-                        <option value="学术研究者">学术研究者</option>
-                        <option value="投资人">投资人</option>
-                        <option value="客户群体">客户群体</option>
-                        <option value="培训学员">培训学员</option>
-                        <option value="项目团队">项目团队</option>
-                        <option value="行业专家">行业专家</option>
-                        <option value="普通大众">普通大众</option>
-                        <option value="自定义">自定义受众</option>
-                    </select>
-                </div>
-                <!-- 自定义受众输入框 -->
-                <div id="custom-audience-section" style="display: none;">
-                    <input type="text" id="custom_audience" name="custom_audience"
-                        placeholder="请描述您的目标受众，例如：初级程序员、产品经理、高中生等..."
-                        style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px;">
-                    <small
-                        style="color: #7f8c8d; font-size: 12px; margin-top: 5px; display: block;">详细描述您的目标受众特征，AI将据此调整内容深度和表达方式</small>
+                <label class="req-label" for="audience_type">目标受众</label>
+                <select id="audience_type" name="audience_type" class="req-select"
+                    onchange="toggleCustomAudience()" required>
+                    <option value="">请选择目标受众</option>
+                    <option value="企业管理层">企业管理层</option>
+                    <option value="技术团队">技术团队</option>
+                    <option value="销售团队">销售团队</option>
+                    <option value="学生群体">学生群体</option>
+                    <option value="学术研究者">学术研究者</option>
+                    <option value="投资人">投资人</option>
+                    <option value="客户群体">客户群体</option>
+                    <option value="培训学员">培训学员</option>
+                    <option value="项目团队">项目团队</option>
+                    <option value="行业专家">行业专家</option>
+                    <option value="普通大众">普通大众</option>
+                    <option value="自定义">自定义受众</option>
+                </select>
+                <div id="custom-audience-section" style="display: none; margin-top: 10px;">
+                    <input type="text" id="custom_audience" name="custom_audience" class="req-input"
+                        placeholder="请描述您的目标受众，例如：初级程序员、产品经理、高中生等...">
+                    <small class="req-hint">详细描述目标受众特征，AI 将据此调整内容深度和表达方式</small>
                 </div>
             </div>
         </div>
 
+        <div class="req-divider"></div>
 
-
-
-
-        <div style="margin-bottom: 25px;">
-            <label style="display: block; margin-bottom: 8px; color: #2c3e50; font-weight: bold;">PPT页数设置 (Page
-                Count)</label>
-            <p style="font-size: 12px; color: #7f8c8d; margin-bottom: 15px;">选择PPT的页数生成方式：</p>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
-                <div class="page-count-option active" data-mode="ai_decide"
-                    style="border: 1px solid var(--border-color); border-radius: 10px; padding: 15px; cursor: pointer; text-align: center; transition: all 0.3s ease;">
-                    <h5 style="color: #2c3e50; margin-bottom: 5px;">AI智能决定</h5>
-                    <p style="font-size: 12px; color: #7f8c8d;">AI根据内容深度和逻辑结构自主决定最合适的页数</p>
+        <!-- 页数设置 -->
+        <div class="req-field">
+            <label class="req-label">页数设置<span class="req-label-desc">选择生成方式</span></label>
+            <div class="req-card-grid-2">
+                <div class="page-count-option req-select-card active" data-mode="ai_decide">
+                    <div class="req-select-card-title">AI 智能决定</div>
+                    <p class="req-select-card-desc">根据内容深度和逻辑结构自动决定最合适的页数</p>
                 </div>
-                <div class="page-count-option" data-mode="custom_range"
-                    style="border: 1px solid var(--border-color); border-radius: 10px; padding: 15px; cursor: pointer; text-align: center; transition: all 0.3s ease;">
-                    <h5 style="color: #2c3e50; margin-bottom: 5px;">自定义范围</h5>
-                    <p style="font-size: 12px; color: #7f8c8d;">在指定范围内生成PPT页数</p>
+                <div class="page-count-option req-select-card" data-mode="custom_range">
+                    <div class="req-select-card-title">自定义范围</div>
+                    <p class="req-select-card-desc">在指定范围内生成 PPT 页数</p>
                 </div>
             </div>
             <input type="hidden" id="page_count_mode" name="page_count_mode" value="ai_decide">
 
-            <!-- Custom range section (hidden by default) -->
-            <div id="custom-range-section"
-                style="display: none; margin-top: 15px; padding: 15px; background: var(--surface-subtle); border-radius: 8px; border: 1px solid var(--glass-border);">
-                <div style="display: flex; gap: 15px; align-items: center;">
-                    <div style="flex: 1;">
-                        <label
-                            style="display: block; margin-bottom: 5px; color: #2c3e50; font-weight: bold;">最少页数</label>
-                        <input type="number" id="min_pages" name="min_pages" value="8" min="5" max="50"
-                            style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 6px;">
+            <div id="custom-range-section" class="req-sub-panel" style="display: none;">
+                <div class="req-row">
+                    <div>
+                        <label class="req-label">最少页数</label>
+                        <input type="number" id="min_pages" name="min_pages" class="req-input" value="8" min="5" max="50">
                     </div>
-                    <div style="flex: 1;">
-                        <label
-                            style="display: block; margin-bottom: 5px; color: #2c3e50; font-weight: bold;">最多页数</label>
-                        <input type="number" id="max_pages" name="max_pages" value="15" min="5" max="50"
-                            style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 6px;">
+                    <div>
+                        <label class="req-label">最多页数</label>
+                        <input type="number" id="max_pages" name="max_pages" class="req-input" value="15" min="5" max="50">
                     </div>
                 </div>
-                <p style="font-size: 12px; color: #7f8c8d; margin-top: 10px; margin-bottom: 0;">
-                    建议范围：5-50页，AI会在此范围内生成最合适的页数
-                </p>
+                <small class="req-hint" style="margin-top: 10px;">建议范围 5–50 页，AI 会在此范围内选择最合适的页数</small>
             </div>
         </div>
 
-        <div style="margin-bottom: 25px;">
-            <label style="display: block; margin-bottom: 8px; color: #2c3e50; font-weight: bold;">PPT风格 (Style)</label>
-            <p style="font-size: 12px; color: #7f8c8d; margin-bottom: 15px;">选择适合您内容的PPT风格：</p>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 15px;">
-                <div class="style-option" data-style="general"
-                    style="border: 1px solid var(--border-color); border-radius: 10px; padding: 15px; cursor: pointer; text-align: center; transition: all 0.3s ease;">
-                    <h5 style="color: #2c3e50; margin-bottom: 5px;">通用场景</h5>
-                    <p style="font-size: 12px; color: #7f8c8d;">适用于商务汇报、学术演讲等通用场景</p>
+        <!-- 章节过渡页 -->
+        <div class="req-checkbox-card req-field">
+            <label class="req-checkbox-label">
+                <input type="checkbox" id="include_transition_pages" name="include_transition_pages" value="true">
+                <span>
+                    <span class="req-checkbox-title">增加章节过渡页</span>
+                    <small class="req-checkbox-desc">
+                        开启后，大纲会在主要章节之间插入过渡页面，用于章节分隔和演示节奏控制
+                    </small>
+                </span>
+            </label>
+        </div>
+
+        <div class="req-divider"></div>
+
+        <!-- PPT 风格 -->
+        <div class="req-field">
+            <label class="req-label">PPT 风格<span class="req-label-desc">选择适合内容的风格</span></label>
+            <div class="req-card-grid-3">
+                <div class="style-option req-select-card" data-style="general">
+                    <div class="req-select-card-title">通用场景</div>
+                    <p class="req-select-card-desc">适用于商务汇报、学术演讲等通用场景</p>
                 </div>
-                <div class="style-option" data-style="keynote"
-                    style="border: 1px solid var(--border-color); border-radius: 10px; padding: 15px; cursor: pointer; text-align: center; transition: all 0.3s ease;">
-                    <h5 style="color: #2c3e50; margin-bottom: 5px;">发布会</h5>
-                    <p style="font-size: 12px; color: #7f8c8d;">Apple风格发布会，卡片式布局，科技感强</p>
+                <div class="style-option req-select-card" data-style="keynote">
+                    <div class="req-select-card-title">发布会</div>
+                    <p class="req-select-card-desc">Apple 风格发布会，卡片式布局，科技感强</p>
                 </div>
-                <div class="style-option" data-style="custom"
-                    style="border: 1px solid var(--border-color); border-radius: 10px; padding: 15px; cursor: pointer; text-align: center; transition: all 0.3s ease;">
-                    <h5 style="color: #2c3e50; margin-bottom: 5px;">自定义风格</h5>
-                    <p style="font-size: 12px; color: #7f8c8d;">使用自定义提示词定制独特风格</p>
+                <div class="style-option req-select-card" data-style="custom">
+                    <div class="req-select-card-title">自定义风格</div>
+                    <p class="req-select-card-desc">使用自定义描述定制独特风格</p>
                 </div>
             </div>
             <input type="hidden" id="ppt_style" name="ppt_style" value="general" required>
 
-            <!-- Custom style prompt input (hidden by default) -->
-            <div id="custom-style-section"
-                style="display: none; margin-top: 15px; padding: 15px; background: #f7f7f7; border-radius: 8px; border: 1px solid #ddd;">
-                <label style="display: block; margin-bottom: 8px; color: #333; font-weight: bold;">自定义风格描述</label>
-                <textarea id="custom_style_prompt" name="custom_style_prompt"
-                    style="width: 100%; height: 120px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; resize: vertical; background: #f7f7f7;"
-                    placeholder="请输入希望的PPT风格，如：极简科技蓝、商务卡片式、杂志风、圆角卡片+留白…"></textarea>
-                <p style="font-size: 12px; color: #666; margin-top: 5px;">请用中文描述预期风格和版式要点，AI 将按描述生成对应设计。</p>
+            <div id="custom-style-section" class="req-sub-panel" style="display: none;">
+                <label class="req-label">自定义风格描述</label>
+                <textarea id="custom_style_prompt" name="custom_style_prompt" class="req-textarea"
+                    style="min-height: 100px;"
+                    placeholder="请输入希望的 PPT 风格，如：极简科技蓝、商务卡片式、杂志风、圆角卡片+留白…"></textarea>
+                <small class="req-hint">请用中文描述预期风格和版式要点，AI 将按描述生成对应设计</small>
             </div>
         </div>
 
-        <div style="text-align: center;">
-            <button type="submit" id="confirm-requirements-btn" class="btn btn-primary requirements-submit-btn"
-                style="font-weight: bold;">
+        <!-- 提交 -->
+        <div class="req-submit-area">
+            <button type="submit" id="confirm-requirements-btn" class="btn btn-primary requirements-submit-btn">
                 开始生成大纲
             </button>
         </div>
@@ -371,37 +338,4 @@
         display: none;
     }
 
-    .style-option {
-        transition: all 0.3s ease;
-    }
-
-    .style-option:hover {
-        border-color: var(--surface-contrast) !important;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.12);
-    }
-
-    .style-option.selected {
-        border-color: var(--surface-contrast) !important;
-        background: var(--surface-subtle) !important;
-        transform: translateY(-1px);
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
-    }
-
-    .page-count-option {
-        transition: all 0.3s ease;
-    }
-
-    .page-count-option:hover {
-        border-color: var(--surface-contrast) !important;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.12);
-    }
-
-    .page-count-option.active {
-        border-color: var(--surface-contrast) !important;
-        background: var(--surface-subtle) !important;
-        transform: translateY(-1px);
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
-    }
 </style>

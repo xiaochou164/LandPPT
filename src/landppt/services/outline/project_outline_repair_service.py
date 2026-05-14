@@ -158,7 +158,7 @@ class ProjectOutlineRepairService:
                             errors.append(f'第{slide_index}页：content_points[{j}]必须是非空字符串')
             if 'slide_type' in slide:
                 slide_type = slide['slide_type']
-                valid_types = ['title', 'content', 'agenda', 'thankyou', 'conclusion']
+                valid_types = ['title', 'content', 'agenda', 'transition', 'thankyou', 'conclusion']
                 if slide_type not in valid_types:
                     valid_types_str = ', '.join(valid_types)
                     errors.append(f'第{slide_index}页：slide_type必须是{valid_types_str}中的一个，实际为{slide_type}')

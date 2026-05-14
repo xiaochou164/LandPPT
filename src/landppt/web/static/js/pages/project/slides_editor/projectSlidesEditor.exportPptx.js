@@ -190,6 +190,11 @@
                                 await waitForFormulaRenderReady(sourceDoc, 2400);
                                 await waitForCanvasPaintReady(sourceDoc, 2600);
                                 throwIfClientExportCancelled(exportSignal);
+                                await prepareClientExportDynamicResources(sourceDoc, {
+                                    signal: exportSignal,
+                                    imageTimeoutMs: 3200
+                                });
+                                throwIfClientExportCancelled(exportSignal);
                                 settleCssAnimationsToFinalState(sourceDoc);
                                 await waitForAnimationFrames(sourceDoc.defaultView || window, 1);
                                 throwIfClientExportCancelled(exportSignal);

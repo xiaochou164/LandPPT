@@ -204,6 +204,7 @@ async def generate_outline(
             target_audience=confirmed_requirements.get('target_audience', '普通大众'),
             ppt_style=confirmed_requirements.get('ppt_style', 'general'),
             custom_style_prompt=confirmed_requirements.get('custom_style_prompt'),
+            include_transition_pages=bool(confirmed_requirements.get('include_transition_pages', False)),
             description=confirmed_requirements.get('description')
         )
 
@@ -309,6 +310,7 @@ async def regenerate_outline(
             target_audience=confirmed_requirements.get('target_audience', '普通大众'),
             ppt_style=confirmed_requirements.get('ppt_style', 'general'),
             custom_style_prompt=confirmed_requirements.get('custom_style_prompt'),
+            include_transition_pages=bool(confirmed_requirements.get('include_transition_pages', False)),
             description=confirmed_requirements.get('description')
         )
 
@@ -415,6 +417,7 @@ async def regenerate_outline(
                 fixed_pages=page_count_settings.get('fixed_pages', 10),
                 ppt_style=confirmed_requirements.get('ppt_style', 'general'),
                 custom_style_prompt=confirmed_requirements.get('custom_style_prompt'),
+                include_transition_pages=bool(confirmed_requirements.get('include_transition_pages', False)),
                 file_processing_mode=file_processing_mode,
                 content_analysis_depth=confirmed_requirements.get('content_analysis_depth', 'standard')
             )
@@ -654,6 +657,7 @@ async def generate_file_outline(
                             fixed_pages=confirmed_requirements.get('page_count_settings', {}).get('fixed_pages', 10),
                             ppt_style=confirmed_requirements.get('ppt_style', 'general'),
                             custom_style_prompt=confirmed_requirements.get('custom_style_prompt'),
+                            include_transition_pages=bool(confirmed_requirements.get('include_transition_pages', False)),
                             file_processing_mode=file_processing_mode,
                             content_analysis_depth=content_analysis_depth
                         )

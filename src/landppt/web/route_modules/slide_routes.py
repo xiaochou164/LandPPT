@@ -124,7 +124,7 @@ async def regenerate_slide_async(
 
         target_index = max(0, int(slide_number) - 1)
         batch_payload = SlideBatchRegenerateRequest(slide_indices=[target_index])
-        batch_result = await batch_regenerate_slides(project_id, batch_payload, user)
+        batch_result = await _do_batch_regenerate(project_id, batch_payload, user)
         if not isinstance(batch_result, dict) or not batch_result.get("success"):
             raise RuntimeError((batch_result or {}).get("error") or "Slide regeneration failed")
 
@@ -160,13 +160,18 @@ async def regenerate_slide_async(
     )
 
 
-@router.post("/api/projects/{project_id}/slides/batch-regenerate")
-async def batch_regenerate_slides(
+async def _do_batch_regenerate(
     project_id: str,
     payload: SlideBatchRegenerateRequest,
-    user: User = Depends(get_current_user_required)
+    user: User,
+    progress_callback: Optional[Any] = None,
 ):
-    """Regenerate multiple slides (or all slides) in one request."""
+    """Core batch regeneration logic. Called by both the sync route and async task.
+
+    Args:
+        progress_callback: Optional async/sync callable(completed: int, total: int)
+            invoked after each slide finishes generation.
+    """
     try:
         user_ppt_service = get_ppt_service_for_user(user.id)
         project = await user_ppt_service.project_manager.get_project(project_id, user_id=user.id)
@@ -282,8 +287,9 @@ async def batch_regenerate_slides(
             })
 
         results: List[Dict[str, Any]] = []
+        total_target = len(target_indices)
 
-        for slide_index in target_indices:
+        for done_count, slide_index in enumerate(target_indices):
             slide_number = slide_index + 1  # 1-based for prompts/templates
             slide_outline = outline_slides[slide_index]
             try:
@@ -335,6 +341,15 @@ async def batch_regenerate_slides(
                     "error": str(e)
                 })
 
+            # Report per-slide progress to caller (e.g. background task manager).
+            if progress_callback is not None:
+                try:
+                    ret = progress_callback(done_count + 1, total_target)
+                    if asyncio.iscoroutine(ret):
+                        await ret
+                except Exception:
+                    pass
+
         # Rebuild combined HTML once.
         project.slides_html = user_ppt_service._combine_slides_to_full_html(project.slides_data, outline_title)
         project.updated_at = time.time()
@@ -379,6 +394,16 @@ async def batch_regenerate_slides(
         raise
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+@router.post("/api/projects/{project_id}/slides/batch-regenerate")
+async def batch_regenerate_slides(
+    project_id: str,
+    payload: SlideBatchRegenerateRequest,
+    user: User = Depends(get_current_user_required),
+):
+    """Regenerate multiple slides (or all slides) in one request."""
+    return await _do_batch_regenerate(project_id, payload, user)
 
 
 @router.post("/api/projects/{project_id}/slides/batch-regenerate/async")
@@ -454,7 +479,14 @@ async def batch_regenerate_slides_async(
         except Exception:
             pass
 
-        result = await batch_regenerate_slides(project_id, payload, user)
+        def on_slide_progress(completed: int, total: int):
+            pct = (completed / total) * 100 if total > 0 else 0
+            try:
+                task_manager.update_task_status(task_id, TaskStatus.RUNNING, progress=round(pct, 1))
+            except Exception:
+                pass
+
+        result = await _do_batch_regenerate(project_id, payload, user, progress_callback=on_slide_progress)
         if not isinstance(result, dict) or not result.get("success"):
             raise RuntimeError((result or {}).get("error") or "Batch slide regeneration failed")
         return result

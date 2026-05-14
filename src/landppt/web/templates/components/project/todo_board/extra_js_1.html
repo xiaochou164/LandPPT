@@ -425,13 +425,8 @@
     function updatePageCountStyles() {
         const pageCountOptions = document.querySelectorAll('.page-count-option');
         pageCountOptions.forEach(option => {
-            if (option.classList.contains('active')) {
-                option.style.borderColor = '#111';
-                option.style.background = '#f5f5f5';
-            } else {
-                option.style.borderColor = '#d9d9d9';
-                option.style.background = '#fff';
-            }
+            option.style.borderColor = '';
+            option.style.background = '';
         });
     }
 

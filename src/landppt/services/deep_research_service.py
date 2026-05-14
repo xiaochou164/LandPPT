@@ -15,6 +15,7 @@ from pathlib import Path
 from tavily import TavilyClient
 from ..core.config import ai_config
 from ..ai import get_ai_provider
+from .prompts.system_prompts import SystemPrompts
 
 logger = logging.getLogger(__name__)
 
@@ -287,6 +288,7 @@ class DEEPResearchService:
         )
 
         ai_provider = await self.get_ai_provider_async()
+        prompt = SystemPrompts.with_text_cache_prefix(prompt)
         chunks: List[str] = []
 
         try:

@@ -128,7 +128,7 @@ class SlideContentService:
 
     def _normalize_slide_type(self, slide_type: str) -> str:
         """Normalize slide type to supported values"""
-        type_mapping = {'agenda': 'agenda', 'section': 'section', 'conclusion': 'conclusion', 'thankyou': 'thankyou', 'title': 'title', 'content': 'content', 'image': 'image', 'chart': 'chart', 'list': 'list', 'overview': 'content', 'summary': 'conclusion', 'intro': 'content', 'ending': 'thankyou'}
+        type_mapping = {'agenda': 'agenda', 'section': 'section', 'transition': 'transition', 'section_divider': 'transition', 'conclusion': 'conclusion', 'thankyou': 'thankyou', 'title': 'title', 'content': 'content', 'image': 'image', 'chart': 'chart', 'list': 'list', 'overview': 'content', 'summary': 'conclusion', 'intro': 'content', 'ending': 'thankyou'}
         return type_mapping.get(slide_type, 'content')
 
     async def _generate_enhanced_content(self, outline: PPTOutline, request: PPTGenerationRequest) -> List[SlideContent]:
@@ -156,6 +156,8 @@ class SlideContentService:
                 verified_slide.layout = 'agenda_layout'
             elif slide.type == 'section':
                 verified_slide.layout = 'section_layout'
+            elif slide.type == 'transition':
+                verified_slide.layout = 'transition_layout'
             elif slide.type == 'conclusion':
                 verified_slide.layout = 'conclusion_layout'
             elif slide.type == 'thankyou':

@@ -16,6 +16,7 @@ from ...utils.thread_pool import run_blocking_io
 from .outline_workflow_support import (
     build_file_info,
     build_processing_stats,
+    build_transition_page_requirement_text,
     build_validation_requirements,
     create_outline_from_file_content,
     get_chunk_size_from_request,
@@ -81,6 +82,10 @@ class OutlineWorkflowService:
         svc = self._service
         try:
             logger.info("Streaming file outline generation for %s", request.filename)
+            project_requirements = (
+                (getattr(request, "requirements", "") or "")
+                + build_transition_page_requirement_text(request)
+            )
             try:
                 generator, cache_dir = await self._create_outline_generator(request)
                 try:
@@ -92,7 +97,7 @@ class OutlineWorkflowService:
                     request.file_path,
                     project_topic=request.topic or "",
                     project_scenario=request.scenario or "general",
-                    project_requirements=getattr(request, "requirements", "") or "",
+                    project_requirements=project_requirements,
                     target_audience=getattr(request, "target_audience", "General audience"),
                     custom_audience="",
                     ppt_style=getattr(request, "ppt_style", "general"),
@@ -176,6 +181,10 @@ class OutlineWorkflowService:
         svc = self._service
         try:
             logger.info("Generating file outline for %s", request.filename)
+            project_requirements = (
+                (getattr(request, "requirements", "") or "")
+                + build_transition_page_requirement_text(request)
+            )
             try:
                 generator, cache_dir = await self._create_outline_generator(request)
                 try:
@@ -187,7 +196,7 @@ class OutlineWorkflowService:
                     request.file_path,
                     project_topic=request.topic or "",
                     project_scenario=request.scenario or "general",
-                    project_requirements=getattr(request, "requirements", "") or "",
+                    project_requirements=project_requirements,
                     target_audience=getattr(request, "target_audience", "General audience"),
                     custom_audience="",
                     ppt_style=getattr(request, "ppt_style", "general"),

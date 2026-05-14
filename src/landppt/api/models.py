@@ -94,6 +94,7 @@ class PPTGenerationRequest(BaseModel):
     target_audience: Optional[str] = Field(None, description="Target audience for the PPT")
     ppt_style: str = Field("general", description="PPT style: 'general', 'conference', 'custom'")
     custom_style_prompt: Optional[str] = Field(None, description="Custom style prompt")
+    include_transition_pages: bool = Field(False, description="Whether to add transition slides between major sections")
     description: Optional[str] = Field(None, description="Additional description or requirements")
     # 文件生成相关参数
     use_file_content: bool = Field(False, description="Whether to use uploaded file content for generation")
@@ -163,7 +164,7 @@ class ProjectListResponse(BaseModel):
 
 # Enhanced Slide Models
 class SlideContent(BaseModel):
-    type: Literal["title", "content", "image", "chart", "list", "thankyou", "agenda", "section", "conclusion"]
+    type: Literal["title", "content", "image", "chart", "list", "thankyou", "agenda", "section", "transition", "conclusion"]
     title: str
     subtitle: Optional[str] = None
     content: Optional[str] = None
@@ -204,6 +205,7 @@ class FileOutlineGenerationRequest(BaseModel):
     fixed_pages: Optional[int] = Field(10, description="Fixed page count")
     ppt_style: str = Field("general", description="PPT style: 'general', 'conference', 'custom'")
     custom_style_prompt: Optional[str] = Field(None, description="Custom style prompt")
+    include_transition_pages: bool = Field(False, description="Whether to add transition slides between major sections")
     file_processing_mode: str = Field("markitdown", description="File processing mode")
     content_analysis_depth: str = Field("standard", description="Content analysis depth")
 

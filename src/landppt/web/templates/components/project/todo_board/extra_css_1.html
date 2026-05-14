@@ -966,6 +966,7 @@
         color: var(--surface);
     }
 
+    /* ── Requirements form shell ── */
     .requirements-shell {
         position: relative;
         overflow: hidden;
@@ -974,9 +975,119 @@
     .requirements-form-grid {
         display: flex;
         flex-direction: column;
-        gap: 14px;
+        gap: 0;
     }
 
+    /* ── Section header ── */
+    .req-header {
+        text-align: center;
+        margin-bottom: 28px;
+    }
+
+    .req-header-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--surface-contrast);
+        color: var(--surface);
+        padding: 10px 22px;
+        border-radius: 40px;
+        margin-bottom: 12px;
+        font-weight: 600;
+        font-size: 1.05em;
+        letter-spacing: 0.02em;
+    }
+
+    .req-header-badge h3 {
+        margin: 0;
+        font-weight: inherit;
+        font-size: inherit;
+    }
+
+    .req-header-desc {
+        color: var(--text-secondary);
+        margin: 0;
+        font-size: 0.92em;
+        line-height: 1.6;
+    }
+
+    /* ── Form field ── */
+    .req-field {
+        margin-bottom: 22px;
+    }
+
+    .req-label {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--text-primary);
+        font-weight: 600;
+        font-size: 14px;
+        letter-spacing: 0.01em;
+    }
+
+    .req-label-desc {
+        font-size: 12px;
+        color: var(--text-secondary);
+        font-weight: 400;
+        margin-left: 4px;
+    }
+
+    .req-input,
+    .req-select,
+    .req-textarea {
+        width: 100%;
+        padding: 11px 14px;
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        font-size: 14px;
+        line-height: 1.5;
+        background: var(--surface);
+        color: var(--text-primary);
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .req-input:focus,
+    .req-select:focus,
+    .req-textarea:focus {
+        outline: none;
+        border-color: rgba(17, 17, 17, 0.55);
+        box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.07);
+    }
+
+    .req-input::placeholder,
+    .req-textarea::placeholder {
+        color: var(--text-secondary);
+        opacity: 0.6;
+    }
+
+    .req-textarea {
+        resize: vertical;
+        min-height: 110px;
+    }
+
+    .req-hint {
+        display: block;
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+    }
+
+    /* ── Layout helpers ── */
+    .req-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+    }
+
+    /* ── Section divider ── */
+    .req-divider {
+        height: 1px;
+        background: var(--glass-border);
+        margin: 6px 0 22px;
+    }
+
+    /* ── Selectable card (used for content source, page count, style) ── */
     .requirements-card {
         padding: 16px;
         border: 1px solid var(--glass-border);
@@ -991,22 +1102,30 @@
     }
 
     .source-option-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
         border: 1px solid var(--border-color);
         border-radius: 10px;
-        padding: 10px 12px;
+        padding: 11px 14px;
         cursor: pointer;
         background: var(--surface);
-        transition: all 0.2s ease;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    }
+
+    .source-option-item input[type="radio"] {
+        accent-color: var(--surface-contrast);
     }
 
     .source-option-item:hover {
-        transform: translateY(-1px);
-        box-shadow: var(--shadow-soft);
+        border-color: rgba(17, 17, 17, 0.35);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
     }
 
     .source-option-item.is-active {
         border-color: rgba(17, 17, 17, 0.6);
-        background: linear-gradient(135deg, rgba(17, 17, 17, 0.07), rgba(17, 17, 17, 0.02));
+        background: linear-gradient(135deg, rgba(17, 17, 17, 0.06), rgba(17, 17, 17, 0.02));
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
     }
 
     .source-option-title {
@@ -1014,7 +1133,7 @@
         align-items: center;
         gap: 8px;
         font-weight: 600;
-        color: #1f2937;
+        color: var(--text-primary);
     }
 
     .source-option-desc {
@@ -1026,7 +1145,7 @@
 
     .source-panel {
         margin-bottom: 20px;
-        padding: 15px;
+        padding: 16px;
         border-radius: 10px;
         border: 1px solid var(--glass-border);
         background: var(--surface-subtle);
@@ -1035,15 +1154,236 @@
     .source-panel textarea {
         width: 100%;
         min-height: 110px;
-        padding: 10px;
+        padding: 11px 14px;
         border: 1px solid var(--border-color);
-        border-radius: 8px;
+        border-radius: 10px;
         background: var(--surface);
         resize: vertical;
+        font-size: 14px;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .source-panel textarea:focus {
+        outline: none;
+        border-color: rgba(17, 17, 17, 0.55);
+        box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.07);
+    }
+
+    /* ── Selection card grid (page count, style) ── */
+    .req-card-grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+
+    .req-card-grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+
+    .req-select-card {
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 16px;
+        cursor: pointer;
+        text-align: center;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, transform 0.15s ease;
+        background: var(--surface);
+    }
+
+    .req-select-card:hover {
+        border-color: rgba(17, 17, 17, 0.4);
+        box-shadow: 0 3px 12px rgba(0, 0, 0, 0.08);
+        transform: translateY(-1px);
+    }
+
+    .req-select-card.active,
+    .req-select-card.selected {
+        border-color: var(--surface-contrast);
+        background: linear-gradient(135deg, rgba(17, 17, 17, 0.06), rgba(17, 17, 17, 0.015));
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+
+    .req-select-card-title {
+        font-weight: 600;
+        font-size: 14px;
+        color: var(--text-primary);
+        margin-bottom: 4px;
+    }
+
+    .req-select-card-desc {
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.45;
+        margin: 0;
+    }
+
+    /* ── Expandable sub-section ── */
+    .req-sub-panel {
+        margin-top: 12px;
+        padding: 16px;
+        background: var(--surface-subtle);
+        border-radius: 10px;
+        border: 1px solid var(--glass-border);
+    }
+
+    .req-sub-panel .req-label {
+        font-size: 13px;
+    }
+
+    /* ── Checkbox card ── */
+    .req-checkbox-card {
+        padding: 14px 16px;
+        border: 1px solid var(--glass-border);
+        border-radius: 12px;
+        background: var(--surface-subtle);
+        transition: border-color 0.2s ease;
+    }
+
+    .req-checkbox-card:has(input:checked) {
+        border-color: rgba(17, 17, 17, 0.45);
+        background: linear-gradient(135deg, rgba(17, 17, 17, 0.05), rgba(17, 17, 17, 0.01));
+    }
+
+    .req-checkbox-label {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        cursor: pointer;
+        color: var(--text-primary);
+    }
+
+    .req-checkbox-label input[type="checkbox"] {
+        margin-top: 3px;
+        accent-color: var(--surface-contrast);
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+    }
+
+    .req-checkbox-title {
+        font-weight: 600;
+        font-size: 14px;
+    }
+
+    .req-checkbox-desc {
+        display: block;
+        color: var(--text-secondary);
+        margin-top: 4px;
+        font-size: 12px;
+        line-height: 1.55;
+    }
+
+    /* ── Submit area ── */
+    .req-submit-area {
+        text-align: center;
+        padding-top: 8px;
     }
 
     .requirements-submit-btn {
-        min-width: 240px;
+        min-width: 260px;
+        padding: 14px 32px;
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        border-radius: 12px;
+        transition: transform 0.15s ease, box-shadow 0.2s ease;
+    }
+
+    .requirements-submit-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+    }
+
+    .requirements-submit-btn:active {
+        transform: translateY(0);
+    }
+
+    /* ── File list area ── */
+    .req-file-list-wrap {
+        background: var(--surface);
+        padding: 12px;
+        border-radius: 8px;
+        border: 1px solid var(--glass-border);
+    }
+
+    .req-file-list-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+
+    .req-file-list-header strong {
+        color: var(--text-primary);
+        font-size: 13px;
+    }
+
+    .req-file-clear-btn {
+        padding: 4px 12px;
+        background: #dc3545;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 12px;
+        transition: background 0.2s ease;
+    }
+
+    .req-file-clear-btn:hover {
+        background: #c82333;
+    }
+
+    /* ── File processing options ── */
+    .req-file-options {
+        margin-top: 14px;
+        padding: 14px;
+        background: var(--surface);
+        border-radius: 10px;
+        border: 1px solid var(--glass-border);
+    }
+
+    .req-file-options h6 {
+        margin: 0 0 10px;
+        color: var(--text-primary);
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    .req-file-options-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+    }
+
+    .req-file-options-grid > div {
+        flex: 1;
+        min-width: 180px;
+    }
+
+    .req-file-options-grid label {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--text-secondary);
+        font-size: 13px;
+    }
+
+    .req-file-options-grid select {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        font-size: 13px;
+        background: var(--surface);
+        transition: border-color 0.2s ease;
+    }
+
+    .req-file-options-grid select:focus {
+        outline: none;
+        border-color: rgba(17, 17, 17, 0.55);
     }
 
     /* 响应式设计 */
@@ -1073,6 +1413,14 @@
         }
 
         .source-option-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .req-row {
+            grid-template-columns: 1fr;
+        }
+
+        .req-card-grid-3 {
             grid-template-columns: 1fr;
         }
     }

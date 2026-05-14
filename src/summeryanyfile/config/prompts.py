@@ -18,6 +18,10 @@ class PromptTemplates:
         timezone_name = now.tzname() or "Local"
         return "\n".join([
             f"- 当前本地时间：{now:%Y-%m-%d %H:%M:%S} ({timezone_name})",
+            f"- 当前年份：{now:%Y}",
+            f"- 当前月份：{now.month}",
+            f"- 当前季度：Q{quarter}",
+            "- 如果大纲需要使用“当前、今年、本月、本季度、最近”等时间语义，请以上述时间为准；若项目需求、调研内容或来源材料已给出明确日期或周期，优先使用来源值。",
         ])
     
     @staticmethod

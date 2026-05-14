@@ -196,6 +196,567 @@
             return new Promise(resolve => setTimeout(resolve, ms));
         }
 
+        const CLIENT_EXPORT_RESOURCE_CACHE = new Map();
+        const CLIENT_EXPORT_MAX_INLINE_BYTES = 18 * 1024 * 1024;
+
+        function resolveClientExportUrl(rawUrl, doc) {
+            const value = String(rawUrl || '').trim();
+            if (!value || value.startsWith('#') || /^javascript:/i.test(value)) return '';
+            if (/^data:/i.test(value)) return value;
+            try {
+                const parsed = new URL(value, (doc && doc.baseURI) || window.location.href);
+                const appOwnedPath = /^\/(?:api\/image\/view\/|api\/image\/thumbnail\/|static\/|temp\/)/i.test(parsed.pathname || '');
+                const localHost = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)$/i.test(parsed.hostname || '');
+                if (appOwnedPath && localHost && window.location && window.location.origin) {
+                    return `${window.location.origin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+                }
+                return parsed.href;
+            } catch (_) {
+                return value;
+            }
+        }
+
+        function readBlobAsDataUrl(blob) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+                reader.onerror = () => resolve(null);
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        async function fetchClientExportResourceAsDataUrl(rawUrl, doc, timeoutMs = 4500) {
+            const resolvedUrl = resolveClientExportUrl(rawUrl, doc);
+            if (!resolvedUrl) return null;
+            if (/^data:/i.test(resolvedUrl)) return resolvedUrl;
+            if (/^(javascript|mailto|tel|about):/i.test(resolvedUrl)) return null;
+            if (CLIENT_EXPORT_RESOURCE_CACHE.has(resolvedUrl)) {
+                return CLIENT_EXPORT_RESOURCE_CACHE.get(resolvedUrl);
+            }
+
+            const fetchPromise = (async () => {
+                let controller = null;
+                let timer = null;
+                try {
+                    if (typeof AbortController === 'function') {
+                        controller = new AbortController();
+                        timer = setTimeout(() => controller.abort(), timeoutMs);
+                    }
+                    const response = await fetch(resolvedUrl, {
+                        credentials: 'same-origin',
+                        mode: 'cors',
+                        signal: controller ? controller.signal : undefined
+                    });
+                    if (!response || !response.ok) return null;
+                    const blob = await response.blob();
+                    if (!blob || blob.size <= 0 || blob.size > CLIENT_EXPORT_MAX_INLINE_BYTES) return null;
+                    const type = String(blob.type || '').toLowerCase();
+                    if (type && !/^image\/|^video\//.test(type)) return null;
+                    return await readBlobAsDataUrl(blob);
+                } catch (_) {
+                    return null;
+                } finally {
+                    if (timer) clearTimeout(timer);
+                }
+            })();
+
+            CLIENT_EXPORT_RESOURCE_CACHE.set(resolvedUrl, fetchPromise);
+            const result = await fetchPromise;
+            CLIENT_EXPORT_RESOURCE_CACHE.set(resolvedUrl, result);
+            return result;
+        }
+
+        function extractCssUrlTokens(value) {
+            const urls = [];
+            const text = String(value || '');
+            if (!/url\s*\(/i.test(text)) return urls;
+            text.replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (_, quote, url) => {
+                const clean = String(url || '').trim();
+                if (clean) urls.push(clean);
+                return _;
+            });
+            return urls;
+        }
+
+        async function inlineImageElementForClientExport(img, doc) {
+            if (!img || !img.getAttribute) return;
+            try {
+                const lazySrc = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src');
+                if (!img.getAttribute('src') && lazySrc) {
+                    img.setAttribute('src', lazySrc);
+                }
+                img.loading = 'eager';
+                img.decoding = 'sync';
+            } catch (_) { }
+
+            const sourceUrl = img.currentSrc || img.getAttribute('src') || '';
+            if (!sourceUrl || /^data:/i.test(sourceUrl)) {
+                try {
+                    img.removeAttribute('srcset');
+                    img.removeAttribute('sizes');
+                } catch (_) { }
+                return;
+            }
+
+            const dataUrl = await fetchClientExportResourceAsDataUrl(sourceUrl, doc);
+            if (dataUrl && /^data:image\//i.test(dataUrl)) {
+                img.setAttribute('src', dataUrl);
+                img.removeAttribute('srcset');
+                img.removeAttribute('sizes');
+            } else if (img.currentSrc && img.currentSrc !== img.getAttribute('src')) {
+                img.setAttribute('src', img.currentSrc);
+                img.removeAttribute('srcset');
+                img.removeAttribute('sizes');
+            }
+        }
+
+        async function inlineCssBackgroundImagesForClientExport(doc, root) {
+            if (!doc || !root || !root.querySelectorAll) return;
+            const win = doc.defaultView || window;
+            const nodes = [root, ...Array.from(root.querySelectorAll('*'))];
+
+            for (const node of nodes) {
+                if (!node || !node.style) continue;
+                let bgImage = '';
+                try {
+                    bgImage = win.getComputedStyle(node).getPropertyValue('background-image') || '';
+                } catch (_) {
+                    bgImage = '';
+                }
+                const urls = extractCssUrlTokens(bgImage);
+                if (!urls.length) continue;
+
+                let rewritten = bgImage;
+                for (const url of urls) {
+                    if (/^data:/i.test(url)) continue;
+                    const dataUrl = await fetchClientExportResourceAsDataUrl(url, doc);
+                    if (dataUrl && /^data:image\//i.test(dataUrl)) {
+                        const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        rewritten = rewritten.replace(new RegExp(escaped, 'g'), dataUrl);
+                    }
+                }
+                if (rewritten !== bgImage) {
+                    node.style.setProperty('background-image', rewritten, 'important');
+                }
+            }
+        }
+
+        function inferClientExportObjectFitFromBackgroundSize(bgSize) {
+            const raw = String(bgSize || '').trim().toLowerCase();
+            if (raw.includes('cover')) return 'cover';
+            if (raw.includes('contain')) return 'contain';
+            if (raw.includes('100% 100%') || raw.includes('100%')) return 'fill';
+            return 'cover';
+        }
+
+        function parseClientExportObjectPosition(positionValue) {
+            const tokens = String(positionValue || '50% 50%').trim().toLowerCase().split(/\s+/).filter(Boolean);
+            const parseToken = (token) => {
+                if (token === 'left' || token === 'top') return 0;
+                if (token === 'center') return 0.5;
+                if (token === 'right' || token === 'bottom') return 1;
+                if (token.endsWith('%')) {
+                    const n = parseFloat(token);
+                    return Number.isFinite(n) ? n / 100 : 0.5;
+                }
+                return 0.5;
+            };
+            return {
+                x: parseToken(tokens[0] || '50%'),
+                y: parseToken(tokens[1] || tokens[0] || '50%')
+            };
+        }
+
+        function calculateClientExportImageRect(imgW, imgH, targetW, targetH, objectFit, objectPosition) {
+            const safeImgW = Math.max(1, imgW || targetW || 1);
+            const safeImgH = Math.max(1, imgH || targetH || 1);
+            const fit = String(objectFit || 'cover').toLowerCase();
+            const wRatio = targetW / safeImgW;
+            const hRatio = targetH / safeImgH;
+            let renderW = targetW;
+            let renderH = targetH;
+            if (fit === 'contain') {
+                const s = Math.min(wRatio, hRatio);
+                renderW = safeImgW * s;
+                renderH = safeImgH * s;
+            } else if (fit === 'cover') {
+                const s = Math.max(wRatio, hRatio);
+                renderW = safeImgW * s;
+                renderH = safeImgH * s;
+            } else if (fit === 'none') {
+                renderW = safeImgW;
+                renderH = safeImgH;
+            }
+            const pos = parseClientExportObjectPosition(objectPosition);
+            return {
+                x: (targetW - renderW) * pos.x,
+                y: (targetH - renderH) * pos.y,
+                w: renderW,
+                h: renderH
+            };
+        }
+
+        async function convertClientExportImageUrlToPngDataUrl(rawUrl, doc, targetW, targetH, objectFit, objectPosition, filterValue) {
+            const resolvedUrl = resolveClientExportUrl(rawUrl, doc);
+            if (!resolvedUrl) return null;
+            try {
+                let bitmap = null;
+                if (/^data:/i.test(resolvedUrl)) {
+                    bitmap = await new Promise(resolve => {
+                        const img = new Image();
+                        img.onload = () => resolve(img);
+                        img.onerror = () => resolve(null);
+                        img.src = resolvedUrl;
+                    });
+                } else {
+                    const response = await fetch(resolvedUrl, { credentials: 'same-origin', mode: 'cors' });
+                    if (!response || !response.ok) return null;
+                    const blob = await response.blob();
+                    if (!blob || blob.size <= 0) return null;
+
+                    bitmap = typeof createImageBitmap === 'function'
+                        ? await createImageBitmap(blob)
+                        : await new Promise(resolve => {
+                            const objectUrl = URL.createObjectURL(blob);
+                            const img = new Image();
+                            img.onload = () => {
+                                URL.revokeObjectURL(objectUrl);
+                                resolve(img);
+                            };
+                            img.onerror = () => {
+                                URL.revokeObjectURL(objectUrl);
+                                resolve(null);
+                            };
+                            img.src = objectUrl;
+                        });
+                }
+                if (!bitmap) return null;
+
+                const width = Math.max(1, Math.round(targetW || bitmap.width || 1));
+                const height = Math.max(1, Math.round(targetH || bitmap.height || 1));
+                const canvas = doc.createElement('canvas');
+                canvas.width = width * 2;
+                canvas.height = height * 2;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return null;
+                ctx.scale(2, 2);
+                if (filterValue && String(filterValue).trim().toLowerCase() !== 'none') {
+                    try { ctx.filter = filterValue; } catch (_) { }
+                }
+                const rect = calculateClientExportImageRect(
+                    bitmap.width,
+                    bitmap.height,
+                    width,
+                    height,
+                    objectFit,
+                    objectPosition
+                );
+                ctx.drawImage(bitmap, rect.x, rect.y, rect.w, rect.h);
+                if (typeof bitmap.close === 'function') bitmap.close();
+                return canvas.toDataURL('image/png');
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function getClientExportBackgroundDebugState() {
+            const state = window.__LANDPPT_PPTX_BG_EXPORT_DEBUG__ || {
+                version: '2026-04-25-layer-clip-v21',
+                startedAt: new Date().toISOString(),
+                candidates: 0,
+                materialized: 0,
+                skipped: [],
+                converted: []
+            };
+            window.__LANDPPT_PPTX_BG_EXPORT_DEBUG__ = state;
+            return state;
+        }
+
+        function recordClientExportBackgroundDebug(kind, payload) {
+            try {
+                const state = getClientExportBackgroundDebugState();
+                if (kind === 'candidate') {
+                    state.candidates += 1;
+                    return;
+                }
+                if (kind === 'materialized') {
+                    state.materialized += 1;
+                    state.converted.push(payload);
+                    if (state.converted.length > 80) state.converted.shift();
+                    return;
+                }
+                state.skipped.push({ kind, ...(payload || {}) });
+                if (state.skipped.length > 120) state.skipped.shift();
+            } catch (_) { }
+        }
+
+        function buildClientExportBackgroundImageElement(doc, sourceNode, cs, dataUrl, width, height) {
+            const img = doc.createElement('img');
+            img.src = dataUrl;
+            img.alt = '';
+            img.setAttribute('data-client-export-bg-image', 'true');
+            img.setAttribute('data-client-export-bg-materialized', 'true');
+            if (sourceNode && sourceNode.className) img.className = sourceNode.className;
+
+            const position = cs.getPropertyValue('position') || 'absolute';
+            img.style.position = position === 'static' ? 'absolute' : position;
+            img.style.left = cs.getPropertyValue('left') || '0px';
+            img.style.top = cs.getPropertyValue('top') || '0px';
+            img.style.right = cs.getPropertyValue('right') || 'auto';
+            img.style.bottom = cs.getPropertyValue('bottom') || 'auto';
+            img.style.zIndex = cs.getPropertyValue('z-index') || 'auto';
+            img.style.width = `${Math.max(1, Math.round(width || 1))}px`;
+            img.style.height = `${Math.max(1, Math.round(height || 1))}px`;
+            img.style.margin = cs.getPropertyValue('margin') || '0';
+            img.style.opacity = cs.getPropertyValue('opacity') || '1';
+            img.style.transform = cs.getPropertyValue('transform') || 'none';
+            img.style.transformOrigin = cs.getPropertyValue('transform-origin') || '50% 50%';
+            img.style.display = 'block';
+            img.style.objectFit = 'fill';
+            img.style.objectPosition = '50% 50%';
+            img.style.pointerEvents = 'none';
+            img.style.borderRadius = cs.getPropertyValue('border-radius') || '0';
+            img.style.setProperty('background', 'none', 'important');
+            img.style.setProperty('background-image', 'none', 'important');
+            img.style.setProperty('filter', 'none', 'important');
+            img.width = Math.max(1, Math.round(width || 1));
+            img.height = Math.max(1, Math.round(height || 1));
+            return img;
+        }
+
+        function buildClientExportBackgroundUnderlayImage(doc, dataUrl, width, height) {
+            const img = doc.createElement('img');
+            img.src = dataUrl;
+            img.alt = '';
+            img.setAttribute('data-client-export-bg-image', 'true');
+            img.setAttribute('data-client-export-bg-underlay', 'true');
+            img.style.position = 'absolute';
+            img.style.inset = '0';
+            img.style.width = '100%';
+            img.style.height = '100%';
+            img.style.display = 'block';
+            img.style.objectFit = 'fill';
+            img.style.objectPosition = '50% 50%';
+            img.style.pointerEvents = 'none';
+            img.style.zIndex = '0';
+            img.style.margin = '0';
+            img.style.setProperty('background', 'none', 'important');
+            img.width = Math.max(1, Math.round(width || 1));
+            img.height = Math.max(1, Math.round(height || 1));
+            return img;
+        }
+
+        async function materializeLeafBackgroundImagesForClientExport(doc, root) {
+            if (!doc || !root || !root.querySelectorAll) return;
+            const win = doc.defaultView || window;
+            const nodes = [root, ...Array.from(root.querySelectorAll('*'))];
+
+            for (const node of nodes) {
+                if (!node || !node.style || node.getAttribute('data-client-export-bg-materialized') === 'true') continue;
+
+                let cs;
+                try { cs = win.getComputedStyle(node); } catch (_) { continue; }
+                if (!cs) continue;
+
+                const bgImage = cs.getPropertyValue('background-image') || '';
+                const urls = extractCssUrlTokens(bgImage);
+                if (!urls.length) continue;
+                recordClientExportBackgroundDebug('candidate');
+
+                const rect = node.getBoundingClientRect();
+                const width = Math.max(1, Math.round(rect.width || node.offsetWidth || 1));
+                const height = Math.max(1, Math.round(rect.height || node.offsetHeight || 1));
+                const hasChildElements = !!(node.children && node.children.length > 0);
+                const hasTextContent = !!(node.textContent && node.textContent.trim());
+                const isVisualLeaf = !hasChildElements && !hasTextContent;
+                if (width <= 1 || height <= 1) {
+                    recordClientExportBackgroundDebug('zero-size', {
+                        className: node.className || '',
+                        bgImage: bgImage.slice(0, 180),
+                        width,
+                        height
+                    });
+                    continue;
+                }
+
+                const dataUrl = await convertClientExportImageUrlToPngDataUrl(
+                    urls[0],
+                    doc,
+                    width,
+                    height,
+                    inferClientExportObjectFitFromBackgroundSize(cs.getPropertyValue('background-size')),
+                    cs.getPropertyValue('background-position') || '50% 50%',
+                    isVisualLeaf ? (cs.getPropertyValue('filter') || '') : ''
+                );
+                if (!dataUrl) {
+                    recordClientExportBackgroundDebug('convert-failed', {
+                        className: node.className || '',
+                        url: resolveClientExportUrl(urls[0], doc).slice(0, 240),
+                        width,
+                        height
+                    });
+                    continue;
+                }
+
+                const img = isVisualLeaf
+                    ? buildClientExportBackgroundImageElement(doc, node, cs, dataUrl, width, height)
+                    : buildClientExportBackgroundUnderlayImage(doc, dataUrl, width, height);
+                node.setAttribute('data-client-export-bg-materialized', 'true');
+                if (isVisualLeaf && node.parentNode && node !== root && node.tagName !== 'BODY' && node.tagName !== 'HTML') {
+                    node.parentNode.replaceChild(img, node);
+                } else {
+                    if (isVisualLeaf) {
+                        img.style.position = 'absolute';
+                        img.style.inset = '0';
+                        img.style.width = '100%';
+                        img.style.height = '100%';
+                    } else if (cs.getPropertyValue('position') === 'static') {
+                        node.style.setProperty('position', 'relative', 'important');
+                    }
+                    node.style.setProperty('background-image', 'none', 'important');
+                    if (isVisualLeaf) node.style.setProperty('filter', 'none', 'important');
+                    node.insertBefore(img, node.firstChild);
+                }
+                recordClientExportBackgroundDebug('materialized', {
+                    className: node.className || '',
+                    tagName: node.tagName || '',
+                    url: resolveClientExportUrl(urls[0], doc).slice(0, 240),
+                    width,
+                    height,
+                    mode: img.parentNode === node ? (isVisualLeaf ? 'append-child' : 'prepend-underlay') : 'replace-node'
+                });
+            }
+        }
+
+        function createSnapshotImageFromElement(el, dataUrl) {
+            if (!el || !el.parentNode || !dataUrl) return null;
+            const doc = el.ownerDocument || document;
+            const img = doc.createElement('img');
+            img.src = dataUrl;
+            img.alt = el.getAttribute && el.getAttribute('aria-label') || '';
+            img.className = el.className || '';
+            img.style.cssText = el.getAttribute && el.getAttribute('style') || '';
+            if (!img.style.display) img.style.display = 'block';
+            if (!img.style.width) img.style.width = `${el.getBoundingClientRect().width || el.offsetWidth || 1}px`;
+            if (!img.style.height) img.style.height = `${el.getBoundingClientRect().height || el.offsetHeight || 1}px`;
+            img.setAttribute('data-client-export-snapshot', 'true');
+            el.parentNode.replaceChild(img, el);
+            return img;
+        }
+
+        async function snapshotCanvasElementsForClientExport(doc) {
+            if (!doc || !doc.querySelectorAll) return;
+            const canvases = Array.from(doc.querySelectorAll('canvas'));
+            for (const canvas of canvases) {
+                try {
+                    if (!canvas.width || !canvas.height) continue;
+                    const dataUrl = canvas.toDataURL('image/png');
+                    if (dataUrl && dataUrl.length > 128) {
+                        createSnapshotImageFromElement(canvas, dataUrl);
+                    }
+                } catch (_) {
+                    // Tainted canvases are left in place; dom-to-pptx will make its own best effort.
+                }
+            }
+        }
+
+        async function snapshotVideoElementsForClientExport(doc) {
+            if (!doc || !doc.querySelectorAll) return;
+            const videos = Array.from(doc.querySelectorAll('video'));
+            for (const video of videos) {
+                let dataUrl = null;
+                const poster = video.getAttribute('poster') || '';
+                if (poster) {
+                    dataUrl = await fetchClientExportResourceAsDataUrl(poster, doc);
+                }
+                if (!dataUrl) {
+                    try {
+                        if (video.readyState < 2) {
+                            await Promise.race([
+                                new Promise(resolve => {
+                                    video.addEventListener('loadeddata', resolve, { once: true });
+                                    video.addEventListener('error', resolve, { once: true });
+                                }),
+                                _sleep(1200)
+                            ]);
+                        }
+                        const rect = video.getBoundingClientRect();
+                        const w = Math.max(1, Math.round(video.videoWidth || rect.width || video.offsetWidth || 1));
+                        const h = Math.max(1, Math.round(video.videoHeight || rect.height || video.offsetHeight || 1));
+                        const canvas = doc.createElement('canvas');
+                        canvas.width = w;
+                        canvas.height = h;
+                        const ctx = canvas.getContext('2d');
+                        if (ctx) {
+                            ctx.drawImage(video, 0, 0, w, h);
+                            dataUrl = canvas.toDataURL('image/png');
+                        }
+                    } catch (_) {
+                        dataUrl = null;
+                    }
+                }
+                if (dataUrl && /^data:image\//i.test(dataUrl)) {
+                    createSnapshotImageFromElement(video, dataUrl);
+                }
+            }
+        }
+
+        async function prepareClientExportDynamicResources(doc, options = {}) {
+            if (!doc || !doc.body) return;
+            window.__LANDPPT_PPTX_BG_EXPORT_DEBUG__ = {
+                version: '2026-04-25-layer-clip-v21',
+                startedAt: new Date().toISOString(),
+                candidates: 0,
+                materialized: 0,
+                skipped: [],
+                converted: []
+            };
+            const signal = options.signal || null;
+            const throwIfCancelled = () => {
+                if (signal && signal.aborted) {
+                    throw signal.reason || createClientExportAbortError();
+                }
+            };
+
+            throwIfCancelled();
+            const images = Array.from(doc.images || []);
+            for (const img of images) {
+                throwIfCancelled();
+                await inlineImageElementForClientExport(img, doc);
+            }
+
+            await waitForDocumentImagesReady(doc, Number.isFinite(options.imageTimeoutMs) ? options.imageTimeoutMs : 2600);
+            throwIfCancelled();
+            await inlineCssBackgroundImagesForClientExport(doc, doc.body);
+            throwIfCancelled();
+            await materializeLeafBackgroundImagesForClientExport(doc, doc.body);
+            throwIfCancelled();
+            await snapshotVideoElementsForClientExport(doc);
+            throwIfCancelled();
+            await snapshotCanvasElementsForClientExport(doc);
+        }
+
+        window.__landpptDebugMaterializeBg = async function (targetDoc) {
+            const doc =
+                targetDoc ||
+                (document.getElementById('slideFrame') &&
+                    (document.getElementById('slideFrame').contentDocument ||
+                        (document.getElementById('slideFrame').contentWindow &&
+                            document.getElementById('slideFrame').contentWindow.document))) ||
+                document;
+            window.__LANDPPT_PPTX_BG_EXPORT_DEBUG__ = {
+                version: '2026-04-25-layer-clip-v21',
+                startedAt: new Date().toISOString(),
+                candidates: 0,
+                materialized: 0,
+                skipped: [],
+                converted: []
+            };
+            await inlineCssBackgroundImagesForClientExport(doc, doc.body);
+            await materializeLeafBackgroundImagesForClientExport(doc, doc.body);
+            return window.__LANDPPT_PPTX_BG_EXPORT_DEBUG__;
+        };
+
         async function waitForDocumentFontsReady(doc, timeoutMs = 1500) {
             if (!doc || !doc.fonts || !doc.fonts.ready) return;
             try {

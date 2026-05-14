@@ -20,6 +20,7 @@ from .models.slide_image_info import (
     ImageRequirement, ImageSource, ImagePurpose
 )
 from .image.models import ImageSourceType
+from .prompts.system_prompts import SystemPrompts
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ class PPTImageProcessor:
             provider, role_settings = get_role_provider("image_prompt", provider_override=self.provider_override)
             if role_settings.get("model"):
                 kwargs.setdefault("model", role_settings["model"])
+        prompt = SystemPrompts.with_text_cache_prefix(prompt)
         return await provider.text_completion(prompt=prompt, **kwargs)
 
 
@@ -122,6 +124,141 @@ class PPTImageProcessor:
                 return candidate
 
         return None
+
+    def _clamp_requirement_count(
+        self,
+        source: ImageSource,
+        raw_count: Any,
+        image_config: Dict[str, Any],
+        remaining_total: int,
+    ) -> int:
+        """将AI返回的图片数量限制在服务端配置范围内。"""
+        try:
+            count = int(raw_count)
+        except (TypeError, ValueError):
+            count = 0
+        if count <= 0 or remaining_total <= 0:
+            return 0
+
+        per_source_limits = {
+            ImageSource.LOCAL: int(image_config.get('max_local_images_per_slide', 2) or 2),
+            ImageSource.NETWORK: int(image_config.get('max_network_images_per_slide', 2) or 2),
+            ImageSource.AI_GENERATED: int(image_config.get('max_ai_images_per_slide', 1) or 1),
+        }
+        return max(0, min(count, per_source_limits.get(source, count), remaining_total))
+
+    def _clean_compact_text(self, text: Any, max_length: int = 160) -> str:
+        """压缩文本，便于作为搜索词或兜底提示词片段。"""
+        value = str(text or "").strip()
+        value = re.sub(r"[\r\n\t]+", " ", value)
+        value = re.sub(r"\s+", " ", value)
+        value = value.strip(" -_，。,.；;：:")
+        if len(value) > max_length:
+            value = value[:max_length].rsplit(" ", 1)[0] or value[:max_length]
+        return value
+
+    def _build_fallback_search_keywords(
+        self,
+        slide_title: str,
+        slide_content: str,
+        project_topic: str,
+        project_scenario: str,
+        requirement: Optional[ImageRequirement] = None,
+        max_length: int = 90,
+    ) -> str:
+        """不额外调用LLM的关键词兜底。"""
+        parts = [
+            requirement.description if requirement else "",
+            slide_title,
+            project_topic,
+            project_scenario,
+        ]
+        combined = " ".join(self._clean_compact_text(part, 40) for part in parts if part)
+        combined = re.sub(r"[^\w\u4e00-\u9fff\s-]+", " ", combined)
+        combined = re.sub(r"\s+", " ", combined).strip()
+        return self._truncate_search_query(combined or slide_title or project_topic or "presentation", max_length)
+
+    def _get_planned_search_keywords(
+        self,
+        requirement: ImageRequirement,
+        slide_title: str,
+        slide_content: str,
+        project_topic: str,
+        project_scenario: str,
+        max_length: int = 90,
+    ) -> str:
+        """优先使用一次图片规划返回的关键词，缺失时本地兜底，不再追加LLM调用。"""
+        keywords = self._clean_compact_text(requirement.search_keywords, max_length)
+        if not keywords:
+            keywords = self._build_fallback_search_keywords(
+                slide_title,
+                slide_content,
+                project_topic,
+                project_scenario,
+                requirement,
+                max_length=max_length,
+            )
+        return keywords
+
+    def _build_fallback_generation_prompt(
+        self,
+        slide_title: str,
+        slide_content: str,
+        project_topic: str,
+        project_scenario: str,
+        requirement: Optional[ImageRequirement],
+        image_index: int,
+    ) -> str:
+        """不额外调用LLM的AI图片提示词兜底。"""
+        purpose = requirement.purpose.value if requirement else "illustration"
+        description = requirement.description if requirement else ""
+        topic = self._clean_compact_text(project_topic, 80)
+        title = self._clean_compact_text(slide_title, 80)
+        desc = self._clean_compact_text(description or slide_content, 140)
+        return (
+            "Professional presentation visual, clean modern composition, "
+            f"topic: {topic}, slide: {title}, purpose: {purpose}, "
+            f"visual brief: {desc}, image {image_index}, no text, no watermark, "
+            "high quality, suitable for a 16:9 business slide."
+        )
+
+    def _parse_planned_dimensions(
+        self,
+        requirement_data: Dict[str, Any],
+        provider_key: str,
+        image_config: Dict[str, Any],
+    ) -> tuple:
+        """从一次规划结果中解析尺寸，缺失或非法时使用提供商首选尺寸。"""
+        planned_size = (
+            requirement_data.get("size")
+            or requirement_data.get("dimensions")
+            or {
+                "width": requirement_data.get("width"),
+                "height": requirement_data.get("height"),
+            }
+        )
+        parsed = self._normalize_resolution_value(planned_size)
+        options = self._get_resolution_options(provider_key, image_config)
+        if not options:
+            options = [(1792, 1024), (1024, 1792), (1024, 1024)]
+        if parsed and parsed in options:
+            return parsed
+        return options[0]
+
+    def _build_dimension_options_for_prompt(self, provider_key: str, image_config: Dict[str, Any]) -> str:
+        """构建AI可选尺寸说明，供一次规划同时选择尺寸。"""
+        options = self._get_resolution_options(provider_key, image_config) or [(1792, 1024), (1024, 1792), (1024, 1024)]
+        option_lines = []
+        for idx, (w, h) in enumerate(options[:6], start=1):
+            aspect = w / h
+            if aspect > 1.1:
+                orientation = "横向"
+            elif aspect < 0.9:
+                orientation = "竖向"
+            else:
+                orientation = "正方形"
+            option_lines.append(f"{idx}. {w}x{h}（{orientation}）")
+        return "\n".join(option_lines)
 
     async def process_slide_image(self, slide_data: Dict[str, Any], confirmed_requirements: Dict[str, Any],
                                  page_number: int, total_pages: int, template_html: str = "") -> Optional[SlideImagesCollection]:
@@ -231,6 +368,8 @@ class PPTImageProcessor:
                 max_network = image_config.get('max_network_images_per_slide', 2)
                 max_ai = image_config.get('max_ai_images_per_slide', 1)
                 max_total = image_config.get('max_total_images_per_slide', 3)
+                default_ai_provider = (image_config.get('default_ai_image_provider') or 'dalle').lower()
+                ai_dimension_options = self._build_dimension_options_for_prompt(default_ai_provider, image_config)
 
                 # 构建启用来源的说明
                 enabled_sources_desc = []
@@ -239,7 +378,10 @@ class PPTImageProcessor:
                 if ImageSource.NETWORK in enabled_sources:
                     enabled_sources_desc.append(f"network: 网络搜索图片，适合特定主题的高质量图片 (最多{max_network}张)")
                 if ImageSource.AI_GENERATED in enabled_sources:
-                    enabled_sources_desc.append(f"ai_generated: AI生成图片，适合定制化、创意性图片 (最多{max_ai}张)")
+                    enabled_sources_desc.append(
+                        f"ai_generated: AI生成图片，适合定制化、创意性图片 (最多{max_ai}张，"
+                        f"默认提供商{default_ai_provider})"
+                    )
 
                 # 构建包含模板HTML的提示词
                 template_context = ""
@@ -249,7 +391,7 @@ class PPTImageProcessor:
 {template_html[:500]}...
 """
 
-                prompt = f"""作为专业的PPT设计师，请分析以下幻灯片的图片需求。首先判断该页面内容是否需要或适合配图，如果不需要或不适合配图则返回0。
+                prompt = f"""作为专业的PPT设计师，请一次性完成以下幻灯片的图片规划。先判断该页面内容是否需要或适合配图，如果不需要或不适合配图则返回0；如果需要，请同时给出图片来源、数量、搜索关键词、AI生成尺寸和AI生成提示词。
 
 【项目信息】
 - 主题：{project_topic}
@@ -267,6 +409,10 @@ class PPTImageProcessor:
 
 【可用图片来源及限制】
 {chr(10).join(enabled_sources_desc)}
+
+【AI生成图片可选尺寸】
+当前AI图片提供商：{default_ai_provider}
+{ai_dimension_options}
 
 【图片用途说明】
 1. decoration: 装饰性图片，美化页面
@@ -304,6 +450,10 @@ class PPTImageProcessor:
 - 总图片数量不能超过{max_total}张
 - 只能使用已启用的图片来源
 - 每种来源都有数量限制，请严格遵守
+- 只允许从“AI生成图片可选尺寸”中选择尺寸
+- 对 local/network 需求必须直接给出 search_keywords，后续不会再调用LLM生成关键词
+- 对 ai_generated 需求必须直接给出 width、height 和 generation_prompts，后续不会再调用LLM选择尺寸或生成提示词
+- generation_prompts 必须是英文，每张图片一个提示词，长度不超过120词，避免文字、Logo、水印
 
 请以JSON格式返回分析结果，格式如下：
 {{
@@ -315,7 +465,11 @@ class PPTImageProcessor:
             "count": 数字,
             "purpose": "decoration/illustration/background/icon/chart_support/content_visual",
             "description": "具体需求描述",
-            "priority": 1-5
+            "priority": 1-5,
+            "search_keywords": "local/network使用的3-6个关键词；ai_generated可为空",
+            "width": 1792,
+            "height": 1024,
+            "generation_prompts": ["仅ai_generated必填，数组长度等于count，每项为英文图片生成提示词"]
         }}
     ],
     "reasoning": "分析理由，包括是否适合配图的判断依据"
@@ -326,6 +480,8 @@ class PPTImageProcessor:
 - 每种来源可以有多个需求项，支持不同用途
 - 优先级1-5，5为最高优先级
 - 严格遵守数量限制，避免页面过于拥挤
+- local/network的search_keywords要具体、可搜索；中文项目优先中文关键词，英文项目优先英文关键词
+- ai_generated的generation_prompts要可直接提交给图片生成服务
 - 必须返回有效的JSON格式，不要添加任何解释文字
 - 不要使用markdown代码块包装
 - 确保所有字符串值都用双引号包围
@@ -358,16 +514,77 @@ class PPTImageProcessor:
 
                 # 创建需求对象
                 requirements = SlideImageRequirements(page_number=page_number, requirements=[])
+                remaining_total = int(max_total or 0)
 
                 for req_data in result.get('requirements', []):
+                    source = ImageSource(req_data['source'])
+                    if source not in enabled_sources:
+                        logger.warning(f"AI返回未启用的图片来源，已忽略: {source.value}")
+                        continue
+
+                    count = self._clamp_requirement_count(
+                        source,
+                        req_data.get('count', 0),
+                        image_config,
+                        remaining_total,
+                    )
+                    if count <= 0:
+                        continue
+
+                    width = None
+                    height = None
+                    generation_prompts = None
+                    if source == ImageSource.AI_GENERATED:
+                        width, height = self._parse_planned_dimensions(
+                            req_data,
+                            default_ai_provider,
+                            image_config,
+                        )
+                        raw_prompts = req_data.get("generation_prompts") or req_data.get("image_prompts") or []
+                        if isinstance(raw_prompts, str):
+                            raw_prompts = [raw_prompts]
+                        generation_prompts = [
+                            self._clean_compact_text(prompt, 900)
+                            for prompt in raw_prompts
+                            if self._clean_compact_text(prompt, 900)
+                        ][:count]
+                        while len(generation_prompts) < count:
+                            generation_prompts.append(
+                                self._build_fallback_generation_prompt(
+                                    slide_title,
+                                    slide_content_text,
+                                    project_topic,
+                                    project_scenario,
+                                    None,
+                                    len(generation_prompts) + 1,
+                                )
+                            )
+
+                    search_keywords = self._clean_compact_text(req_data.get('search_keywords'), 160)
+                    if source in (ImageSource.LOCAL, ImageSource.NETWORK) and not search_keywords:
+                        search_keywords = self._build_fallback_search_keywords(
+                            slide_title,
+                            slide_content_text,
+                            project_topic,
+                            project_scenario,
+                            None,
+                        )
+
                     requirement = ImageRequirement(
-                        source=ImageSource(req_data['source']),
-                        count=req_data['count'],
+                        source=source,
+                        count=count,
                         purpose=ImagePurpose(req_data['purpose']),
                         description=req_data['description'],
-                        priority=req_data.get('priority', 1)
+                        priority=req_data.get('priority', 1),
+                        search_keywords=search_keywords or None,
+                        width=width,
+                        height=height,
+                        generation_prompts=generation_prompts,
                     )
                     requirements.add_requirement(requirement)
+                    remaining_total -= count
+                    if remaining_total <= 0:
+                        break
 
                 logger.info(f"AI分析第{page_number}页图片需求: {result.get('reasoning', '')}")
                 return requirements
@@ -453,9 +670,14 @@ class PPTImageProcessor:
                 logger.info("本地图片库为空，跳过本地图片选择")
                 return images
 
-            # 让AI生成搜索关键词
-            search_keywords = await self._ai_generate_local_search_keywords(
-                slide_title, slide_content, project_topic, project_scenario, requirement
+            # 优先复用一次图片规划中的关键词，避免为本地图片再调用LLM。
+            search_keywords = self._get_planned_search_keywords(
+                requirement,
+                slide_title,
+                slide_content,
+                project_topic,
+                project_scenario,
+                max_length=90,
             )
 
             if not search_keywords:
@@ -518,9 +740,15 @@ class PPTImageProcessor:
             if provider != desired_provider:
                 logger.warning(f"默认网络搜索提供商'{desired_provider}'不可用，降级使用'{provider}'")
 
-            # 让AI生成搜索关键词
-            search_query = await self._ai_generate_search_query(
-                slide_title, slide_content, project_topic, project_scenario, requirement, default_provider=provider
+            # 优先复用一次图片规划中的关键词，避免为网络搜索再调用LLM。
+            max_length = 100 if provider == 'pixabay' else 200
+            search_query = self._get_planned_search_keywords(
+                requirement,
+                slide_title,
+                slide_content,
+                project_topic,
+                project_scenario,
+                max_length=max_length,
             )
 
             if not search_query:
@@ -668,17 +896,32 @@ class PPTImageProcessor:
             default_provider = (image_config.get('default_ai_image_provider') or 'dalle').lower()
             logger.info(f"使用AI图片提供商: {default_provider}")
 
-            # 让AI决定图片尺寸（对于多张图片，使用相同尺寸保持一致性）
-            width, height = await self._ai_decide_image_dimensions(
-                slide_title, slide_content, project_topic, project_scenario, requirement, default_provider, image_config
-            )
+            # 尺寸和提示词来自一次图片规划；缺失时使用本地兜底，避免继续调用LLM。
+            if requirement.width and requirement.height:
+                width, height = int(requirement.width), int(requirement.height)
+            else:
+                resolution_options = self._get_resolution_options(default_provider, image_config)
+                width, height = (resolution_options[0] if resolution_options else (1792, 1024))
+
+            planned_prompts = [
+                self._clean_compact_text(prompt, 900)
+                for prompt in (requirement.generation_prompts or [])
+                if self._clean_compact_text(prompt, 900)
+            ]
 
             # 为每张图片生成不同的提示词
             for i in range(requirement.count):
-                # 让AI生成图片提示词
-                image_prompt = await self._ai_generate_image_prompt(
-                    slide_title, slide_content, project_topic, project_scenario,
-                    page_number, total_pages, template_html, requirement, i + 1
+                image_prompt = (
+                    planned_prompts[i]
+                    if i < len(planned_prompts)
+                    else self._build_fallback_generation_prompt(
+                        slide_title,
+                        slide_content,
+                        project_topic,
+                        project_scenario,
+                        requirement,
+                        i + 1,
+                    )
                 )
 
                 if not image_prompt:

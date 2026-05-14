@@ -51,7 +51,8 @@ class ProjectOutlineStreamingService:
     @staticmethod
     def _get_outline_streaming_system_prompt() -> str:
         """流式大纲生成需要更强的输出约束，避免模型复述任务说明。"""
-        return (
+        from ..prompts.system_prompts import SystemPrompts
+        return SystemPrompts.with_cache_prefix(
             "你是专业的PPT大纲生成器。\n"
             "你只能输出合法的 JSON 大纲，并使用 ```json 代码块包裹。\n"
             "不要复述题目、受众、页数要求、字段说明、示例格式或任务描述。\n"
@@ -250,7 +251,7 @@ class ProjectOutlineStreamingService:
             language = 'zh'
             if project.project_metadata and isinstance(project.project_metadata, dict):
                 language = project.project_metadata.get('language', 'zh')
-            file_request = FileOutlineGenerationRequest(file_path=report_path, filename=Path(report_path).name, topic=confirmed_requirements.get('topic', project.topic), scenario=confirmed_requirements.get('type', project.scenario), requirements=confirmed_requirements.get('requirements', project.requirements), language=language, page_count_mode=confirmed_requirements.get('page_count_settings', {}).get('mode', 'ai_decide'), min_pages=confirmed_requirements.get('page_count_settings', {}).get('min_pages', 8), max_pages=confirmed_requirements.get('page_count_settings', {}).get('max_pages', 15), fixed_pages=confirmed_requirements.get('page_count_settings', {}).get('fixed_pages', 10), ppt_style=confirmed_requirements.get('ppt_style', 'general'), custom_style_prompt=confirmed_requirements.get('custom_style_prompt'), target_audience=confirmed_requirements.get('target_audience', '普通大众'), custom_audience=confirmed_requirements.get('custom_audience'), file_processing_mode='markitdown', content_analysis_depth='fast')
+            file_request = FileOutlineGenerationRequest(file_path=report_path, filename=Path(report_path).name, topic=confirmed_requirements.get('topic', project.topic), scenario=confirmed_requirements.get('type', project.scenario), requirements=confirmed_requirements.get('requirements', project.requirements), language=language, page_count_mode=confirmed_requirements.get('page_count_settings', {}).get('mode', 'ai_decide'), min_pages=confirmed_requirements.get('page_count_settings', {}).get('min_pages', 8), max_pages=confirmed_requirements.get('page_count_settings', {}).get('max_pages', 15), fixed_pages=confirmed_requirements.get('page_count_settings', {}).get('fixed_pages', 10), ppt_style=confirmed_requirements.get('ppt_style', 'general'), custom_style_prompt=confirmed_requirements.get('custom_style_prompt'), include_transition_pages=bool(confirmed_requirements.get('include_transition_pages', False)), target_audience=confirmed_requirements.get('target_audience', '普通大众'), custom_audience=confirmed_requirements.get('custom_audience'), file_processing_mode='markitdown', content_analysis_depth='fast')
             structured_outline = None
             llm_call_count = 0
             last_ping_at = time.time()
@@ -400,7 +401,7 @@ class ProjectOutlineStreamingService:
             topic = confirmed_requirements.get('topic', project.topic)
             target_audience = confirmed_requirements.get('target_audience', '普通大众')
             ppt_style = confirmed_requirements.get('ppt_style', 'general')
-            prompt = prompts_manager.get_streaming_outline_prompt(topic=topic, target_audience=target_audience, ppt_style=ppt_style, page_count_instruction=page_count_instruction, research_section='')
+            prompt = prompts_manager.get_streaming_outline_prompt(topic=topic, target_audience=target_audience, ppt_style=ppt_style, page_count_instruction=page_count_instruction, research_section='', include_transition_pages=bool(confirmed_requirements.get('include_transition_pages', False)))
             yield f"data: {json.dumps({'status': {'step': 'generating', 'message': 'AI 正在构建大纲...', 'progress': 0.0}})}\n\n"
             try:
                 content = ''

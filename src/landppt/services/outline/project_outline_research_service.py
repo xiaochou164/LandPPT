@@ -135,7 +135,7 @@ class ProjectOutlineResearchService:
             logger.info('Using %s research report file for outline generation: %s', provider, report_path)
             try:
                 from ...api.models import FileOutlineGenerationRequest
-                file_request = FileOutlineGenerationRequest(file_path=report_path, filename=Path(report_path).name, topic=request.topic, scenario=request.scenario, requirements=request.requirements, target_audience=getattr(request, 'target_audience', '普通大众'), ppt_style=getattr(request, 'ppt_style', 'general'), custom_style_prompt=getattr(request, 'custom_style_prompt', ''), page_count_mode=page_count_settings.get('mode', 'ai_decide') if page_count_settings else 'ai_decide', min_pages=page_count_settings.get('min_pages') if page_count_settings else None, max_pages=page_count_settings.get('max_pages') if page_count_settings else None, fixed_pages=page_count_settings.get('fixed_pages') if page_count_settings else None, language=request.language)
+                file_request = FileOutlineGenerationRequest(file_path=report_path, filename=Path(report_path).name, topic=request.topic, scenario=request.scenario, requirements=request.requirements, target_audience=getattr(request, 'target_audience', '普通大众'), ppt_style=getattr(request, 'ppt_style', 'general'), custom_style_prompt=getattr(request, 'custom_style_prompt', ''), include_transition_pages=bool(getattr(request, 'include_transition_pages', False)), page_count_mode=page_count_settings.get('mode', 'ai_decide') if page_count_settings else 'ai_decide', min_pages=page_count_settings.get('min_pages') if page_count_settings else None, max_pages=page_count_settings.get('max_pages') if page_count_settings else None, fixed_pages=page_count_settings.get('fixed_pages') if page_count_settings else None, language=request.language)
                 file_outline_result = await self.generate_outline_from_file(file_request)
                 if file_outline_result.success and file_outline_result.outline:
                     outline_data = file_outline_result.outline
@@ -224,11 +224,13 @@ class ProjectOutlineResearchService:
                 slide_type = slide.get('slide_type', slide.get('type', 'content'))
                 page_number = slide.get('page_number', slide.get('id', 1))
                 title_text = slide.get('title', '').lower()
-                if slide_type not in ['title', 'content', 'agenda', 'thankyou', 'conclusion']:
+                if slide_type not in ['title', 'content', 'agenda', 'transition', 'thankyou', 'conclusion']:
                     if page_number == 1 or '标题' in title_text or 'title' in title_text:
                         slide_type = 'title'
                     elif '目录' in title_text or 'agenda' in title_text or '大纲' in title_text:
                         slide_type = 'agenda'
+                    elif '过渡' in title_text or '转场' in title_text or 'transition' in title_text:
+                        slide_type = 'transition'
                     elif '谢谢' in title_text or 'thank' in title_text or '致谢' in title_text:
                         slide_type = 'thankyou'
                     elif '总结' in title_text or '结论' in title_text or 'conclusion' in title_text or ('summary' in title_text):
@@ -237,11 +239,13 @@ class ProjectOutlineResearchService:
                         slide_type = 'content'
                 elif ('目录' in title_text or 'agenda' in title_text or '大纲' in title_text) and slide_type == 'content':
                     slide_type = 'agenda'
+                elif ('过渡' in title_text or '转场' in title_text or 'transition' in title_text) and slide_type == 'content':
+                    slide_type = 'transition'
                 elif ('谢谢' in title_text or 'thank' in title_text or '致谢' in title_text) and slide_type == 'content':
                     slide_type = 'thankyou'
                 elif ('总结' in title_text or '结论' in title_text or 'conclusion' in title_text or ('summary' in title_text)) and slide_type == 'content':
                     slide_type = 'conclusion'
-                type_mapping = {'title': 'title', 'content': 'content', 'conclusion': 'thankyou', 'agenda': 'agenda'}
+                type_mapping = {'title': 'title', 'content': 'content', 'conclusion': 'thankyou', 'agenda': 'agenda', 'transition': 'transition'}
                 mapped_type = type_mapping.get(slide_type, 'content')
                 standardized_slide = {'page_number': slide.get('page_number', slide.get('id', len(standardized_slides) + 1)), 'title': slide.get('title', f'第{len(standardized_slides) + 1}页'), 'content_points': content_points, 'slide_type': slide_type, 'type': mapped_type, 'description': slide.get('description', '')}
                 if 'chart_config' in slide and slide['chart_config']:

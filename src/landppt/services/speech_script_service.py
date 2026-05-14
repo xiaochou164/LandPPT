@@ -14,6 +14,7 @@ from ..ai.base import AIMessage, MessageRole
 from ..ai.providers import get_ai_provider, get_role_provider
 from ..core.config import ai_config
 from ..api.models import PPTProject
+from .prompts.system_prompts import SystemPrompts
 from .progress_tracker import progress_tracker
 
 logger = logging.getLogger(__name__)
@@ -662,7 +663,7 @@ class SpeechScriptService:
         
         # Generate using AI
         response = await self.ai_provider.text_completion(
-            prompt=prompt,
+            prompt=SystemPrompts.with_text_cache_prefix(prompt),
             **self._build_request_kwargs(
                 temperature=0.7
             )
@@ -686,7 +687,7 @@ class SpeechScriptService:
 
         prompt = self._create_humanized_script_prompt(cleaned_script, customization)
         response = await self.ai_provider.text_completion(
-            prompt=prompt,
+            prompt=SystemPrompts.with_text_cache_prefix(prompt),
             **self._build_request_kwargs(
                 temperature=0.55
             )
@@ -922,7 +923,7 @@ class SpeechScriptService:
         )
 
         response = await self.ai_provider.text_completion(
-            prompt=prompt,
+            prompt=SystemPrompts.with_text_cache_prefix(prompt),
             **self._build_request_kwargs(
                 temperature=0.7
             )
@@ -956,7 +957,7 @@ class SpeechScriptService:
         )
 
         response = await self.ai_provider.text_completion(
-            prompt=prompt,
+            prompt=SystemPrompts.with_text_cache_prefix(prompt),
             **self._build_request_kwargs(
                 temperature=0.7
             )

@@ -18,6 +18,7 @@ from langchain_core.documents import Document
 from ...ai import get_ai_provider, AIMessage, MessageRole
 from ...core.config import ai_config
 from ..deep_research_service import DEEPResearchService, ResearchReport, ResearchStep
+from ..prompts.system_prompts import SystemPrompts
 from .searxng_provider import SearXNGContentProvider, SearXNGSearchResponse
 from .content_extractor import WebContentExtractor, ExtractedContent
 
@@ -121,6 +122,7 @@ class EnhancedResearchService:
         )
 
         ai_provider = await self.get_ai_provider_async()
+        prompt = SystemPrompts.with_text_cache_prefix(prompt)
         chunks: List[str] = []
 
         try:

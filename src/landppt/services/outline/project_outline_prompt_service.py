@@ -113,10 +113,11 @@ class ProjectOutlinePromptService:
         style_desc = style_descriptions.get(ppt_style, default_style)
         if custom_style_prompt and ppt_style != 'custom':
             style_desc += f'，{custom_style_prompt}' if language == 'zh' else f', {custom_style_prompt}'
+        include_transition_pages = bool(getattr(request, 'include_transition_pages', False))
         if request.language == 'zh':
-            return prompts_manager.get_outline_prompt_zh(topic=request.topic, scenario_desc=scenario_desc, target_audience=target_audience, style_desc=style_desc, requirements=request.requirements or '', description=description or '', research_section=research_section, page_count_instruction=page_count_instruction, expected_page_count=expected_page_count, language=language or 'zh')
+            return prompts_manager.get_outline_prompt_zh(topic=request.topic, scenario_desc=scenario_desc, target_audience=target_audience, style_desc=style_desc, requirements=request.requirements or '', description=description or '', research_section=research_section, page_count_instruction=page_count_instruction, expected_page_count=expected_page_count, language=language or 'zh', include_transition_pages=include_transition_pages)
         else:
-            return prompts_manager.get_outline_prompt_en(topic=request.topic, scenario_desc=scenario_desc, target_audience=target_audience, style_desc=style_desc, requirements=request.requirements or '', description=description or '', research_section=research_section, page_count_instruction=page_count_instruction, expected_page_count=expected_page_count, language=language or 'en')
+            return prompts_manager.get_outline_prompt_en(topic=request.topic, scenario_desc=scenario_desc, target_audience=target_audience, style_desc=style_desc, requirements=request.requirements or '', description=description or '', research_section=research_section, page_count_instruction=page_count_instruction, expected_page_count=expected_page_count, language=language or 'en', include_transition_pages=include_transition_pages)
 
     def _parse_ai_outline(self, ai_response: str, request: PPTGenerationRequest) -> PPTOutline:
         """Parse AI response to create structured outline"""

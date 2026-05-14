@@ -31,6 +31,7 @@ from ...database.database import AsyncSessionLocal, get_db
 from ...database.models import User
 from ...services.enhanced_ppt_service import EnhancedPPTService
 from ...services.pdf_to_pptx_converter import get_pdf_to_pptx_converter
+from ...services.prompts.system_prompts import SystemPrompts
 from ...services.pyppeteer_pdf_converter import get_pdf_converter
 from ...utils.thread_pool import run_blocking_io, to_thread
 from .support import (
@@ -628,6 +629,8 @@ async def ai_slide_edit_stream(
         else:
             messages.append(AIMessage(role=MessageRole.USER, content=context))
 
+        messages = SystemPrompts.normalize_messages_for_cache(messages)
+
         async def generate_ai_stream():
             try:
                 # 发送开始信号
@@ -796,6 +799,8 @@ async def ai_slide_native_dialog_stream(
             messages.append(AIMessage(role=MessageRole.USER, content=user_content))
         else:
             messages.append(AIMessage(role=MessageRole.USER, content=context))
+
+        messages = SystemPrompts.normalize_messages_for_cache(messages)
 
         async def generate_ai_stream():
             try:
@@ -1417,19 +1422,68 @@ async def ai_auto_generate_slide_images(
 
         logger.info(f"开始为第{request.slide_index + 1}页进行一键配图")
 
-        # 第一步：AI分析幻灯片内容，确定是否需要配图以及配图需求
-        analysis_prompt = f"""作为专业的PPT设计师，请分析以下幻灯片内容，判断是否需要配图以及配图需求。
+        from ...services.db_config_service import get_db_config_service
+        from ...services.models.slide_image_info import ImageRequirement, ImagePurpose, ImageSource, SlideImagesCollection
+
+        db_config_service = get_db_config_service()
+        image_config = await db_config_service.get_config_by_category('image_service', user_id=user.id)
+
+        enable_image_service = image_config.get('enable_image_service', False)
+        if not enable_image_service:
+            return {
+                "success": False,
+                "message": "图片生成服务未启用，请在配置中启用"
+            }
+
+        enabled_sources = []
+        if image_config.get('enable_local_images', True):
+            enabled_sources.append(ImageSource.LOCAL)
+        if image_config.get('enable_network_search', False):
+            enabled_sources.append(ImageSource.NETWORK)
+        if image_config.get('enable_ai_generation', False):
+            enabled_sources.append(ImageSource.AI_GENERATED)
+
+        if not enabled_sources:
+            return {
+                "success": False,
+                "message": "没有启用的图像来源，请在设置中配置图像获取方式"
+            }
+
+        max_total_images = int(image_config.get('max_total_images_per_slide', 3) or 3)
+        default_ai_provider = (image_config.get('default_ai_image_provider') or 'dalle').lower()
+        dimension_options = image_processor._build_dimension_options_for_prompt(default_ai_provider, image_config)
+        enabled_sources_text = ", ".join(source.value for source in enabled_sources)
+        selected_source = select_best_image_source(
+            enabled_sources,
+            image_config,
+            {
+                'image_purpose': 'illustration',
+                'slide_title': slide_title,
+                'slide_content': slide_html
+            },
+        )
+
+        # 第一步：一次LLM调用完成是否需要配图、来源/尺寸选择、搜索词和生成提示词规划
+        analysis_prompt = SystemPrompts.with_cache_prefix(f"""作为专业的PPT设计师，请一次性完成以下幻灯片的配图规划。
 
 项目主题：{request.project_topic}
 项目场景：{request.project_scenario}
 幻灯片标题：{slide_title}
 幻灯片HTML内容：{slide_html[:1000]}...
 
-请分析：
+可用图片来源：{enabled_sources_text}
+服务端默认图片来源：{selected_source.value}
+单页最多图片数：{max_total_images}
+
+AI生成图片可选尺寸（只能从中选择）：
+{dimension_options}
+
+请一次性判断：
 1. 这个幻灯片是否需要配图？
-2. 如果需要，应该配几张图？
-3. 每张图的用途和描述是什么？
-4. 图片应该插入到什么位置？
+2. 如果需要，应该配几张图，使用哪个已启用来源？
+3. 每张图的用途、描述、搜索关键词是什么？
+4. 如果来源是 ai_generated，请同时选择 width/height 并生成可直接提交给图片生成服务的英文 generation_prompt。
+5. 图片应该插入到什么位置？
 
 请以JSON格式回复：
 {{
@@ -1437,14 +1491,26 @@ async def ai_auto_generate_slide_images(
     "image_count": 数量,
     "images": [
         {{
+            "source": "local/network/ai_generated",
             "purpose": "图片用途（如：主要插图、装饰图、背景图等）",
             "description": "图片内容描述",
-            "keywords": "搜索关键词",
+            "keywords": "local/network搜索关键词；ai_generated可为空",
+            "width": 1792,
+            "height": 1024,
+            "generation_prompt": "仅ai_generated必填，英文，<=120词，无文字、Logo、水印",
             "position": "插入位置（如：标题下方、内容中间、页面右侧等）"
         }}
     ],
     "reasoning": "分析理由"
-}}"""
+}}
+
+约束：
+- 只使用已启用的图片来源：{enabled_sources_text}
+- image_count 不得超过 {max_total_images}
+- 如果不需要配图，needs_images=false，image_count=0，images=[]
+- 对 ai_generated 必须给出 width、height、generation_prompt；后续不会再调用LLM选择尺寸或生成提示词
+- 对 local/network 必须给出具体可搜索 keywords；后续不会再调用LLM生成关键词
+- 只返回合法JSON，不要使用markdown代码块。""")
 
         analysis_response = await ai_provider.text_completion(
             prompt=analysis_prompt,
@@ -1461,9 +1527,20 @@ async def ai_auto_generate_slide_images(
                 "needs_images": True,
                 "image_count": 1,
                 "images": [{
+                    "source": selected_source.value,
                     "purpose": "主要插图",
                     "description": f"与{slide_title}相关的配图",
                     "keywords": f"{request.project_topic} {slide_title}",
+                    "width": image_processor._get_resolution_options(default_ai_provider, image_config)[0][0] if image_processor._get_resolution_options(default_ai_provider, image_config) else 1792,
+                    "height": image_processor._get_resolution_options(default_ai_provider, image_config)[0][1] if image_processor._get_resolution_options(default_ai_provider, image_config) else 1024,
+                    "generation_prompt": image_processor._build_fallback_generation_prompt(
+                        slide_title,
+                        slide_html,
+                        request.project_topic,
+                        request.project_scenario,
+                        None,
+                        1,
+                    ),
                     "position": "内容中间"
                 }],
                 "reasoning": "默认为幻灯片添加一张主要配图"
@@ -1486,59 +1563,65 @@ async def ai_auto_generate_slide_images(
                 "ai_analysis": analysis_result
             }
 
-        # 第二步：根据分析结果生成图片需求
-        from ...services.models.slide_image_info import ImageRequirement, ImagePurpose, ImageSource, SlideImagesCollection
-
+        # 第二步：根据一次规划结果生成图片需求
         images_collection = SlideImagesCollection(page_number=request.slide_index + 1, images=[])
 
-        # 获取图像配置 - 从用户数据库配置读取（非环境变量）
-        from ...services.db_config_service import get_db_config_service
-        db_config_service = get_db_config_service()
-        image_config = await db_config_service.get_config_by_category('image_service', user_id=user.id)
-
-        # 检查是否启用图片生成服务
-        enable_image_service = image_config.get('enable_image_service', False)
-        if not enable_image_service:
-            return {
-                "success": False,
-                "message": "图片生成服务未启用，请在配置中启用"
-            }
-
-        # 获取启用的图像来源（使用与重新生成图片相同的逻辑）
-        from ...services.models.slide_image_info import ImageSource
-
-        enabled_sources = []
-        if image_config.get('enable_local_images', True):
-            enabled_sources.append(ImageSource.LOCAL)
-        if image_config.get('enable_network_search', False):
-            enabled_sources.append(ImageSource.NETWORK)
-        if image_config.get('enable_ai_generation', False):
-            enabled_sources.append(ImageSource.AI_GENERATED)
-
-        if not enabled_sources:
-            return {
-                "success": False,
-                "message": "没有启用的图像来源，请在设置中配置图像获取方式"
-            }
-
-        # 使用与重新生成图片完全相同的图片来源选择逻辑
-        image_context = {
-            'image_purpose': 'illustration',  # 一键配图默认为说明性图片
-            'slide_title': slide_title,
-            'slide_content': slide_html
-        }
-
-        selected_source = select_best_image_source(enabled_sources, image_config, image_context)
-
         # 为每个图片需求生成图片
-        for i, image_info in enumerate(analysis_result.get("images", [])[:3]):  # 最多3张图
-            # 创建图片需求
+        planned_images = analysis_result.get("images", []) or []
+        if isinstance(planned_images, dict):
+            planned_images = [planned_images]
+        elif not isinstance(planned_images, list):
+            planned_images = []
+        max_images = min(max_total_images, 3)
+        for i, image_info in enumerate(planned_images[:max_images]):
+            raw_source = str(image_info.get("source") or selected_source.value).strip().lower()
+            raw_source = {
+                "ai": "ai_generated",
+                "ai-generated": "ai_generated",
+                "ai_generation": "ai_generated",
+                "network_search": "network",
+                "local_images": "local",
+            }.get(raw_source, raw_source)
+            try:
+                requirement_source = ImageSource(raw_source)
+            except ValueError:
+                requirement_source = selected_source
+            if requirement_source not in enabled_sources:
+                requirement_source = selected_source
+
+            generation_prompts = None
+            width = None
+            height = None
+            if requirement_source == ImageSource.AI_GENERATED:
+                width, height = image_processor._parse_planned_dimensions(
+                    image_info,
+                    default_ai_provider,
+                    image_config,
+                )
+                raw_prompt = (
+                    image_info.get("generation_prompt")
+                    or image_info.get("prompt")
+                    or image_info.get("image_prompt")
+                    or image_info.get("generation_prompts")
+                )
+                if isinstance(raw_prompt, list):
+                    raw_prompt = next((item for item in raw_prompt if item), "")
+                if raw_prompt:
+                    generation_prompts = [image_processor._clean_compact_text(raw_prompt, 900)]
+
             requirement = ImageRequirement(
                 purpose=ImagePurpose.ILLUSTRATION,
                 description=image_info.get("description", "相关配图"),
                 priority=1,
-                source=selected_source,
-                count=1
+                source=requirement_source,
+                count=1,
+                search_keywords=image_processor._clean_compact_text(
+                    image_info.get("keywords") or image_info.get("search_keywords"),
+                    160,
+                ) or None,
+                width=width,
+                height=height,
+                generation_prompts=generation_prompts,
             )
 
             # 根据选择的来源处理图片生成

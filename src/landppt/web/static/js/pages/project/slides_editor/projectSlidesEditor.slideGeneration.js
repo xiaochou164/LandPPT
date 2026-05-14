@@ -237,6 +237,7 @@ async function batchRegenerateSlides({ slideIndices, regenerateAll }) {
     document.body.appendChild(loadingDiv);
 
     try {
+        normalizeSlidesDataToOutline();
         ensureSlidesDataLength(outlineTotal);
 
         const response = await fetch(`/api/projects/${window.landpptEditorConfig.projectId}/slides/batch-regenerate/async`, {
@@ -264,11 +265,8 @@ async function batchRegenerateSlides({ slideIndices, regenerateAll }) {
 
         const data = rawText ? JSON.parse(rawText) : {};
 
-        if (response.status === 409) {
-            throw new Error(data?.message || '已有批量重新生成任务正在执行，请稍后重试');
-        }
-
-        if (!response.ok) {
+        const reusedExistingTask = response.status === 409;
+        if (!response.ok && !reusedExistingTask) {
             throw new Error(data?.error || data?.detail || data?.message || `${response.status} ${response.statusText}`);
         }
 
@@ -277,8 +275,12 @@ async function batchRegenerateSlides({ slideIndices, regenerateAll }) {
             throw new Error(data?.error || data?.message || '未返回任务ID');
         }
 
+        if (reusedExistingTask && typeof showNotification === 'function') {
+            showNotification('检测到已有批量重新生成任务，正在继续跟踪该任务', 'info');
+        }
+
         const statusTextMap = {
-            pending: '任务排队中...',
+            pending: reusedExistingTask ? '已连接到已有任务，排队中...' : '任务排队中...',
             running: '正在批量重新生成...',
             completed: '生成完成，正在更新页面...',
             failed: '生成失败',

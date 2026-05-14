@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 class ProjectOutlineNormalizationService:
     """统一处理大纲文本解析与结构标准化。"""
 
-    _VALID_SLIDE_TYPES = {"title", "content", "agenda", "thankyou", "conclusion"}
+    _VALID_SLIDE_TYPES = {"title", "content", "agenda", "transition", "thankyou", "conclusion"}
     _SLIDE_TYPE_ALIASES = {
         "title": "title",
         "cover": "title",
@@ -26,6 +26,10 @@ class ProjectOutlineNormalizationService:
         "catalog": "agenda",
         "directory": "agenda",
         "section": "agenda",
+        "transition": "transition",
+        "section_transition": "transition",
+        "section_divider": "transition",
+        "chapter_divider": "transition",
         "content": "content",
         "body": "content",
         "main": "content",
@@ -44,6 +48,7 @@ class ProjectOutlineNormalizationService:
     _TITLE_KEYWORDS = {
         "title": ("标题", "封面", "title", "cover"),
         "agenda": ("目录", "大纲", "agenda", "catalog", "outline", "directory"),
+        "transition": ("过渡", "转场", "transition", "section divider", "chapter divider"),
         "thankyou": ("谢谢", "感谢", "致谢", "thank", "q&a", "qa"),
         "conclusion": ("总结", "结论", "收尾", "summary", "conclusion"),
     }
@@ -290,6 +295,8 @@ class ProjectOutlineNormalizationService:
             return [slide_title.strip() or "演示主题"]
         if slide_type == "agenda":
             return ["本页为章节导航"]
+        if slide_type == "transition":
+            return [slide_title.strip() or "章节过渡"]
         if slide_type in {"thankyou", "conclusion"} or page_number == total_slides:
             return [slide_title.strip() or "总结与结束"]
         return [slide_title.strip() or "内容要点"]

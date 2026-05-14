@@ -12916,7 +12916,15 @@
     runProps += opts.charSpacing ? " spc=\"".concat(Math.round(opts.charSpacing * 100), "\" kern=\"0\"") : ''; // IMPORTANT: Also disable kerning; otherwise text won't actually expand
     runProps += ' dirty="0">';
     // Color / Font / Highlight / Outline are children of <a:rPr>, so add them now before closing the runProperties tag
-    if (opts.color || opts.fontFace || opts.outline || (typeof opts.underline === 'object' && opts.underline.color)) {
+    if (
+      opts.color ||
+      opts.fontFace ||
+      opts.eaFontFace ||
+      opts.latinFontFace ||
+      opts.csFontFace ||
+      opts.outline ||
+      (typeof opts.underline === 'object' && opts.underline.color)
+    ) {
       if (opts.outline && typeof opts.outline === 'object') {
         runProps += "<a:ln w=\"".concat(valToPts(opts.outline.size || 0.75), "\">").concat(genXmlColorSelection(opts.outline.color || 'FFFFFF'), "</a:ln>");
       }
@@ -12928,9 +12936,12 @@
         runProps += "<a:uFill>".concat(genXmlColorSelection(opts.underline.color), "</a:uFill>");
       if (opts.glow)
         runProps += "<a:effectLst>".concat(createGlowElement(opts.glow, DEF_TEXT_GLOW), "</a:effectLst>");
-      if (opts.fontFace) {
+      const latinFontFace = opts.latinFontFace || opts.fontFace || opts.eaFontFace || opts.csFontFace;
+      const eastAsiaFontFace = normalizePowerPointEastAsianFontFace(opts.eaFontFace || opts.fontFace || latinFontFace);
+      const complexScriptFontFace = normalizePowerPointEastAsianFontFace(opts.csFontFace || eastAsiaFontFace || latinFontFace);
+      if (latinFontFace || eastAsiaFontFace || complexScriptFontFace) {
         // NOTE: 'cs' = Complex Script, 'ea' = East Asian (use "-120" instead of "0" - per Issue #174); ea must come first (Issue #174)
-        runProps += "<a:ea typeface=\"".concat(opts.fontFace, "\" pitchFamily=\"34\" charset=\"-122\"/><a:latin typeface=\"").concat(opts.fontFace, "\" pitchFamily=\"34\" charset=\"0\"/><a:cs typeface=\"").concat(opts.fontFace, "\" pitchFamily=\"34\" charset=\"-120\"/>");
+        runProps += "<a:ea typeface=\"".concat(eastAsiaFontFace, "\" pitchFamily=\"34\" charset=\"-122\"/><a:latin typeface=\"").concat(latinFontFace, "\" pitchFamily=\"34\" charset=\"0\"/><a:cs typeface=\"").concat(complexScriptFontFace, "\" pitchFamily=\"34\" charset=\"-120\"/>");
       }
     }
     // Hyperlink support
@@ -13234,12 +13245,18 @@
       /* C: Append 'endParaRPr' (when needed) and close current open paragraph
        * NOTE: (ISSUE#20, ISSUE#193): Add 'endParaRPr' with font/size props or PPT default (Arial/18pt en-us) is used making row "too tall"/not honoring options
        */
-      if (slideObj._type === SLIDE_OBJECT_TYPES.tablecell && (opts.fontSize || opts.fontFace)) {
-        if (opts.fontFace) {
+      if (
+        slideObj._type === SLIDE_OBJECT_TYPES.tablecell &&
+        (opts.fontSize || opts.fontFace || opts.eaFontFace || opts.latinFontFace || opts.csFontFace)
+      ) {
+        if (opts.fontFace || opts.eaFontFace || opts.latinFontFace || opts.csFontFace) {
+          const latinFontFace = opts.latinFontFace || opts.fontFace || opts.eaFontFace || opts.csFontFace;
+          const eastAsiaFontFace = normalizePowerPointEastAsianFontFace(opts.eaFontFace || opts.fontFace || latinFontFace);
+          const complexScriptFontFace = normalizePowerPointEastAsianFontFace(opts.csFontFace || eastAsiaFontFace || latinFontFace);
           strSlideXml += "<a:endParaRPr lang=\"".concat(opts.lang || 'en-US', "\"") + (opts.fontSize ? " sz=\"".concat(Math.round(opts.fontSize * 100), "\"") : '') + ' dirty="0">';
-          strSlideXml += "<a:latin typeface=\"".concat(opts.fontFace, "\" charset=\"0\"/>");
-          strSlideXml += "<a:ea typeface=\"".concat(opts.fontFace, "\" charset=\"0\"/>");
-          strSlideXml += "<a:cs typeface=\"".concat(opts.fontFace, "\" charset=\"0\"/>");
+          strSlideXml += "<a:latin typeface=\"".concat(latinFontFace, "\" charset=\"0\"/>");
+          strSlideXml += "<a:ea typeface=\"".concat(eastAsiaFontFace, "\" charset=\"0\"/>");
+          strSlideXml += "<a:cs typeface=\"".concat(complexScriptFontFace, "\" charset=\"0\"/>");
           strSlideXml += '</a:endParaRPr>';
         }
         else {
@@ -63096,10 +63113,168 @@
     return 'none';
   }
 
+  function getLinearGradientVector(directionRaw, width, height) {
+    const direction = String(directionRaw || '').trim().toLowerCase();
+    if (!direction || direction === 'to bottom') return { x0: 0, y0: 0, x1: 0, y1: height };
+    if (direction === 'to top') return { x0: 0, y0: height, x1: 0, y1: 0 };
+    if (direction === 'to right') return { x0: 0, y0: 0, x1: width, y1: 0 };
+    if (direction === 'to left') return { x0: width, y0: 0, x1: 0, y1: 0 };
+    if (direction === 'to bottom right' || direction === 'to right bottom') {
+      return { x0: 0, y0: 0, x1: width, y1: height };
+    }
+    if (direction === 'to bottom left' || direction === 'to left bottom') {
+      return { x0: width, y0: 0, x1: 0, y1: height };
+    }
+    if (direction === 'to top right' || direction === 'to right top') {
+      return { x0: 0, y0: height, x1: width, y1: 0 };
+    }
+    if (direction === 'to top left' || direction === 'to left top') {
+      return { x0: width, y0: height, x1: 0, y1: 0 };
+    }
+    if (/^-?[\d.]+deg$/.test(direction)) {
+      const deg = parseFloat(direction);
+      const rad = ((deg - 90) * Math.PI) / 180;
+      const cx = width / 2;
+      const cy = height / 2;
+      const len = Math.abs(width * Math.cos(rad)) + Math.abs(height * Math.sin(rad));
+      return {
+        x0: cx - (Math.cos(rad) * len) / 2,
+        y0: cy - (Math.sin(rad) * len) / 2,
+        x1: cx + (Math.cos(rad) * len) / 2,
+        y1: cy + (Math.sin(rad) * len) / 2,
+      };
+    }
+    return { x0: 0, y0: 0, x1: 0, y1: height };
+  }
+
+  function buildLinearMaskGradient(ctx, maskImage, width, height) {
+    const content = extractFirstLinearGradientContent(maskImage);
+    if (!content) return null;
+
+    const parts = splitTopLevelCommaParts(content);
+    if (parts.length < 2) return null;
+
+    let direction = 'to bottom';
+    if (/^(to\s+|[-\d.]+deg\b|[-\d.]+rad\b|[-\d.]+turn\b)/i.test(parts[0])) {
+      direction = parts.shift();
+    }
+
+    const stops = parts
+      .map((part, index) => {
+        const colorMatch = String(part).trim().match(/^(.*?)(?:\s+(-?[\d.]+(?:%|px)?))?$/);
+        if (!colorMatch) return null;
+        const colorText = String(colorMatch[1] || '').trim();
+        const color = parseColor(colorText);
+        if (!color.hex && color.opacity <= 0) {
+          return { offset: null, alpha: 0, index };
+        }
+        const rawOffset = colorMatch[2] || '';
+        const offset = normalizeGradientOffset(rawOffset, index, parts.length, height);
+        const offsetValue = offset && offset.endsWith('%') ? parseFloat(offset) / 100 : null;
+        return {
+          offset: Number.isFinite(offsetValue) ? Math.max(0, Math.min(1, offsetValue)) : null,
+          alpha: Math.max(0, Math.min(1, Number.isFinite(color.opacity) ? color.opacity : 1)),
+          index,
+        };
+      })
+      .filter(Boolean);
+
+    if (stops.length < 2) return null;
+    stops.forEach((stop, index) => {
+      if (!Number.isFinite(stop.offset)) {
+        stop.offset = stops.length <= 1 ? 0 : index / (stops.length - 1);
+      }
+    });
+
+    const vector = getLinearGradientVector(direction, width, height);
+    const gradient = ctx.createLinearGradient(vector.x0, vector.y0, vector.x1, vector.y1);
+    stops.forEach((stop) => {
+      gradient.addColorStop(stop.offset, `rgba(0, 0, 0, ${stop.alpha})`);
+    });
+    return gradient;
+  }
+
+  function applyCssMaskToCanvas(ctx, maskImage, width, height) {
+    const mask = String(maskImage || '').trim();
+    if (!mask || mask === 'none') return false;
+    const gradient = buildLinearMaskGradient(ctx, mask, width, height);
+    if (!gradient) return false;
+
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+    return true;
+  }
+
   function normalizeBackgroundPositionValue(backgroundPosition) {
     const raw = String(backgroundPosition || '').trim();
     if (!raw || raw === 'initial' || raw === 'inherit' || raw === 'unset') return '50% 50%';
     return raw;
+  }
+
+  function rectToPlainObject(rect) {
+    if (!rect) return null;
+    return {
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+    };
+  }
+
+  function intersectPlainRects(a, b) {
+    if (!a || !b) return a || b || null;
+    const left = Math.max(a.left, b.left);
+    const top = Math.max(a.top, b.top);
+    const right = Math.min(a.right, b.right);
+    const bottom = Math.min(a.bottom, b.bottom);
+    if (right <= left || bottom <= top) return null;
+    return { left, top, right, bottom, width: right - left, height: bottom - top };
+  }
+
+  function getOverflowClipRect(node, root) {
+    let clipRect = null;
+    let current = node && node.parentElement;
+    while (current && current.nodeType === 1) {
+      const win = getNodeWindow(current);
+      const style = win.getComputedStyle(current);
+      const overflowValue = `${style.overflowX || style.overflow || ''} ${style.overflowY || style.overflow || ''}`.toLowerCase();
+      if (/\b(hidden|clip|auto|scroll)\b/.test(overflowValue)) {
+        const rect = rectToPlainObject(current.getBoundingClientRect());
+        clipRect = clipRect ? intersectPlainRects(clipRect, rect) : rect;
+        if (!clipRect) return null;
+      }
+      if (current === root) break;
+      current = current.parentElement;
+    }
+    return clipRect;
+  }
+
+  function clipPptOptionsToOverflow(options, node, config) {
+    const clipRect = getOverflowClipRect(node, config.root);
+    if (!clipRect) return options;
+
+    const clipX = config.offX + (clipRect.left - config.rootX) * PX_TO_INCH * config.scale;
+    const clipY = config.offY + (clipRect.top - config.rootY) * PX_TO_INCH * config.scale;
+    const clipW = clipRect.width * PX_TO_INCH * config.scale;
+    const clipH = clipRect.height * PX_TO_INCH * config.scale;
+    const left = Math.max(options.x, clipX);
+    const top = Math.max(options.y, clipY);
+    const right = Math.min(options.x + options.w, clipX + clipW);
+    const bottom = Math.min(options.y + options.h, clipY + clipH);
+    if (right <= left || bottom <= top) return null;
+    return {
+      ...options,
+      x: left,
+      y: top,
+      w: right - left,
+      h: bottom - top,
+    };
   }
 
   const GENERIC_CSS_FONT_FAMILIES = new Set([
@@ -63133,8 +63308,79 @@
     'cursive': ['KaiTi', 'STKaiti', 'Segoe Script'],
     'fantasy': ['Impact', 'Papyrus'],
   };
+  const LATIN_FONT_FALLBACK_CANDIDATES = {
+    'sans-serif': ['Segoe UI', 'Arial', 'Helvetica', 'Aptos', 'Calibri'],
+    'serif': ['Georgia', 'Times New Roman'],
+    'monospace': ['Consolas', 'Courier New', 'Monaco', 'Menlo'],
+    'cursive': ['Segoe Script'],
+    'fantasy': ['Impact'],
+  };
+  const CJK_TEXT_RE = /[\u2e80-\u2eff\u2f00-\u2fdf\u3040-\u30ff\u3100-\u312f\u31a0-\u31bf\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
+  const CJK_FONT_FALLBACK_CANDIDATES = {
+    'cjk-sans': [
+      'Source Han Sans SC',
+      'Noto Sans CJK SC',
+      'Microsoft YaHei',
+      'DengXian',
+      'PingFang SC',
+      'Hiragino Sans GB',
+      'SimHei',
+      'Microsoft JhengHei',
+      'Arial Unicode MS',
+      'Arial',
+    ],
+    'cjk-serif': [
+      'Source Han Serif SC',
+      'Noto Serif CJK SC',
+      'SimSun',
+      'NSimSun',
+      'Songti SC',
+      'STSong',
+      'PMingLiU',
+      'MingLiU',
+      'Times New Roman',
+    ],
+    'cjk-kai': ['KaiTi', 'KaiTi_GB2312', 'STKaiti', 'Kaiti SC', 'Microsoft YaHei'],
+    'cjk-fangsong': ['FangSong', 'FangSong_GB2312', 'STFangsong', 'SimSun'],
+  };
+  const CJK_FONT_ALIAS_FALLBACKS = {
+    'source han sans sc': CJK_FONT_FALLBACK_CANDIDATES['cjk-sans'],
+    'source han sans cn': CJK_FONT_FALLBACK_CANDIDATES['cjk-sans'],
+    'noto sans cjk sc': CJK_FONT_FALLBACK_CANDIDATES['cjk-sans'],
+    'noto sans sc': CJK_FONT_FALLBACK_CANDIDATES['cjk-sans'],
+    'pingfang sc': ['PingFang SC', 'Microsoft YaHei', 'DengXian', 'SimHei', 'Arial'],
+    'source han serif sc': CJK_FONT_FALLBACK_CANDIDATES['cjk-serif'],
+    'source han serif cn': CJK_FONT_FALLBACK_CANDIDATES['cjk-serif'],
+    'noto serif cjk sc': CJK_FONT_FALLBACK_CANDIDATES['cjk-serif'],
+    'noto serif sc': CJK_FONT_FALLBACK_CANDIDATES['cjk-serif'],
+    'songti sc': ['Songti SC', 'SimSun', 'NSimSun', 'STSong', 'Times New Roman'],
+    'stsong': ['STSong', 'SimSun', 'NSimSun', 'Songti SC'],
+    'simsun': ['SimSun', 'NSimSun', 'Songti SC', 'STSong'],
+    'kaiti': CJK_FONT_FALLBACK_CANDIDATES['cjk-kai'],
+    'kaiti sc': CJK_FONT_FALLBACK_CANDIDATES['cjk-kai'],
+    'stkaiti': CJK_FONT_FALLBACK_CANDIDATES['cjk-kai'],
+    'fangsong': CJK_FONT_FALLBACK_CANDIDATES['cjk-fangsong'],
+    'stfangsong': CJK_FONT_FALLBACK_CANDIDATES['cjk-fangsong'],
+  };
+  const LATIN_DOMINANT_FONT_NAMES = new Set([
+    'inter',
+    'arial',
+    'helvetica',
+    'helvetica neue',
+    'segoe ui',
+    'aptos',
+    'calibri',
+    'times new roman',
+    'georgia',
+    'courier new',
+    'consolas',
+    'monaco',
+    'menlo',
+  ]);
   const EXPORT_FONT_AVAILABILITY_CACHE = new WeakMap();
+  const EXPORT_LATIN_FONT_AVAILABILITY_CACHE = new WeakMap();
   const EXPORT_FONT_MEASURE_CACHE = new WeakMap();
+  const EXPORT_FONT_FACE_FAMILY_CACHE = new WeakMap();
 
   function parseFontFamilyList(fontFamilyValue) {
     const raw = String(fontFamilyValue || '').trim();
@@ -63213,11 +63459,177 @@
     return exportedFamilies;
   }
 
+  function normalizeFontFamilyKey(fontFamilyName) {
+    return String(fontFamilyName || '')
+      .trim()
+      .replace(/^['"]+|['"]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .toLowerCase();
+  }
+
+  function normalizePowerPointEastAsianFontFace(fontFamilyName) {
+    const raw = String(fontFamilyName || '').trim();
+    const key = normalizeFontFamilyKey(raw);
+    const map = {
+      'microsoft yahei': '微软雅黑',
+      'microsoft yahei ui': '微软雅黑',
+      'simsun': '宋体',
+      'nsimsun': '新宋体',
+      'simhei': '黑体',
+      'dengxian': '等线',
+      'kaiti': '楷体',
+      'kaiti_gb2312': '楷体_GB2312',
+      'fangsong': '仿宋',
+      'fangsong_gb2312': '仿宋_GB2312',
+      'microsoft jhenghei': '微軟正黑體',
+      'pmingliu': '新細明體',
+      'mingliu': '細明體',
+    };
+    return map[key] || raw;
+  }
+
+  function contextContainsCjkText(fontContext) {
+    if (!fontContext || typeof fontContext !== 'object') return false;
+    const text =
+      typeof fontContext.textContent === 'string'
+        ? fontContext.textContent
+        : typeof fontContext.nodeValue === 'string'
+        ? fontContext.nodeValue
+        : '';
+    return CJK_TEXT_RE.test(text);
+  }
+
+  function getFontContextTextSample(fontContext) {
+    if (!fontContext || typeof fontContext !== 'object') return '';
+    const text =
+      typeof fontContext.textContent === 'string'
+        ? fontContext.textContent
+        : typeof fontContext.nodeValue === 'string'
+        ? fontContext.nodeValue
+        : '';
+    return text.replace(/\s+/g, ' ').trim().slice(0, 80);
+  }
+
+  function getFontExportDebugWindow(fontContext) {
+    if (typeof window !== 'undefined') return window;
+    const doc = getFontContextDocument(fontContext);
+    if (doc && doc.defaultView) return doc.defaultView;
+    return null;
+  }
+
+  function resetFontExportDebug(fontContext = null) {
+    const win = getFontExportDebugWindow(fontContext);
+    if (!win) return null;
+    const store = {
+      version: LANDPPT_DOM_TO_PPTX_PATCH_VERSION,
+      startedAt: new Date().toISOString(),
+      decisions: [],
+      counts: {},
+      usedFamilies: [],
+      detectedFonts: [],
+      embeddedFonts: [],
+    };
+    Object.defineProperty(store, '_seen', {
+      value: new Set(),
+      enumerable: false,
+      configurable: true,
+    });
+    win.__LANDPPT_PPTX_FONT_EXPORT_DEBUG__ = store;
+    return store;
+  }
+
+  function getFontExportDebugStore(fontContext = null) {
+    const win = getFontExportDebugWindow(fontContext);
+    if (!win) return null;
+    const existing = win.__LANDPPT_PPTX_FONT_EXPORT_DEBUG__;
+    if (existing && existing.version === LANDPPT_DOM_TO_PPTX_PATCH_VERSION) {
+      if (!existing._seen) {
+        Object.defineProperty(existing, '_seen', {
+          value: new Set(),
+          enumerable: false,
+          configurable: true,
+        });
+      }
+      return existing;
+    }
+    return resetFontExportDebug(fontContext);
+  }
+
+  function recordFontExportDecision(fontContext, detail) {
+    const store = getFontExportDebugStore(fontContext);
+    if (!store) return;
+    const reason = detail && detail.reason ? String(detail.reason) : 'unknown';
+    store.counts[reason] = (store.counts[reason] || 0) + 1;
+    const key = [
+      detail && detail.fontFamilyValue,
+      detail && detail.resolved,
+      reason,
+      detail && detail.category,
+      detail && detail.hasCjkText ? 'cjk' : 'latin',
+    ].join('|');
+    if (store._seen.has(key) || store.decisions.length >= 300) return;
+    store._seen.add(key);
+    store.decisions.push({
+      fontFamilyValue: detail.fontFamilyValue,
+      families: detail.families || [],
+      resolved: detail.resolved || null,
+      reason,
+      category: detail.category || null,
+      hasCjkText: !!detail.hasCjkText,
+      sample: detail.sample || '',
+    });
+  }
+
   function getFontContextDocument(fontContext) {
     if (fontContext && fontContext.nodeType === 9) return fontContext;
     if (fontContext && fontContext.ownerDocument) return fontContext.ownerDocument;
     if (typeof document !== 'undefined') return document;
     return null;
+  }
+
+  function collectFontFaceFamiliesFromRules(rules, families) {
+    if (!rules) return;
+    for (const rule of Array.from(rules)) {
+      try {
+        if ((rule.constructor && rule.constructor.name === 'CSSFontFaceRule') || rule.type === 5) {
+          for (const family of collectExportFontFamilies(rule.style.getPropertyValue('font-family'))) {
+            families.add(normalizeFontFamilyKey(family));
+          }
+          continue;
+        }
+        if (rule.cssRules && rule.cssRules.length > 0) {
+          collectFontFaceFamiliesFromRules(rule.cssRules, families);
+        }
+      } catch (_) {
+        // Ignore cross-origin or malformed nested rules; font embedding scans separately too.
+      }
+    }
+  }
+
+  function getFontFaceFamiliesForDocument(doc) {
+    const safeDoc = getFontContextDocument(doc);
+    if (!safeDoc || !safeDoc.styleSheets) return new Set();
+    const sheetCount = safeDoc.styleSheets.length || 0;
+    const cached = EXPORT_FONT_FACE_FAMILY_CACHE.get(safeDoc);
+    if (cached && cached.sheetCount === sheetCount) return cached.families;
+
+    const families = new Set();
+    for (const sheet of Array.from(safeDoc.styleSheets || [])) {
+      try {
+        const rules = sheet.cssRules || sheet.rules;
+        collectFontFaceFamiliesFromRules(rules, families);
+      } catch (_) {
+        // Cross-origin stylesheets can deny cssRules. The export still proceeds with fallbacks.
+      }
+    }
+    EXPORT_FONT_FACE_FAMILY_CACHE.set(safeDoc, { families, sheetCount });
+    return families;
+  }
+
+  function hasFontFaceRuleForFamily(fontFamilyName, fontContext) {
+    const key = normalizeFontFamilyKey(fontFamilyName);
+    if (!key) return false;
+    return getFontFaceFamiliesForDocument(fontContext).has(key);
   }
 
   function getFontMeasureContext(doc) {
@@ -63271,6 +63683,11 @@
       return docCache.get(cacheKey);
     }
 
+    if (hasFontFaceRuleForFamily(normalized, doc)) {
+      docCache.set(cacheKey, true);
+      return true;
+    }
+
     const measure = getFontMeasureContext(doc);
     const baseWidths = getBaseFontWidths(doc);
     if (!measure || !baseWidths) {
@@ -63292,12 +63709,153 @@
     return isAvailable;
   }
 
+  function isLatinFontFamilyLikelyAvailable(fontFamilyName, fontContext) {
+    const normalized = String(fontFamilyName || '').trim();
+    if (!normalized || isGenericCssFontFamily(normalized)) return false;
+
+    const doc = getFontContextDocument(fontContext);
+    if (!doc) return true;
+
+    let docCache = EXPORT_LATIN_FONT_AVAILABILITY_CACHE.get(doc);
+    if (!docCache) {
+      docCache = new Map();
+      EXPORT_LATIN_FONT_AVAILABILITY_CACHE.set(doc, docCache);
+    }
+
+    const cacheKey = normalized.toLowerCase();
+    if (docCache.has(cacheKey)) {
+      return docCache.get(cacheKey);
+    }
+
+    if (hasFontFaceRuleForFamily(normalized, doc)) {
+      docCache.set(cacheKey, true);
+      return true;
+    }
+
+    const measure = getFontMeasureContext(doc);
+    if (!measure) {
+      docCache.set(cacheKey, true);
+      return true;
+    }
+
+    const sampleText = 'mmmmmmmmmmlliWWWWWW12345';
+    const baseWidths = {};
+    for (const baseFont of ['monospace', 'sans-serif', 'serif']) {
+      measure.context.font = `72px ${baseFont}`;
+      baseWidths[baseFont] = measure.context.measureText(sampleText).width;
+    }
+
+    let isAvailable = false;
+    for (const baseFont of ['monospace', 'sans-serif', 'serif']) {
+      measure.context.font = `72px "${normalized}", ${baseFont}`;
+      const width = measure.context.measureText(sampleText).width;
+      if (Math.abs(width - baseWidths[baseFont]) > 0.1) {
+        isAvailable = true;
+        break;
+      }
+    }
+
+    docCache.set(cacheKey, isAvailable);
+    return isAvailable;
+  }
+
   function measureFontWidth(fontFamilyName, genericCategory, fontContext) {
     const doc = getFontContextDocument(fontContext);
     const measure = getFontMeasureContext(doc);
     if (!measure) return Number.POSITIVE_INFINITY;
     measure.context.font = `72px "${fontFamilyName}", ${genericCategory}`;
     return measure.context.measureText(measure.sampleText).width;
+  }
+
+  function inferCjkFontCategory(fontFamilyValue) {
+    const rawFamilies = parseFontFamilyList(fontFamilyValue);
+    for (const family of rawFamilies) {
+      const key = normalizeFontFamilyKey(family);
+      if (!key) continue;
+      if (/(^|[\s-])kai|kaiti|stkaiti/.test(key)) return 'cjk-kai';
+      if (/fang\s*song|fangsong|stfangsong/.test(key)) return 'cjk-fangsong';
+      if (/serif|songti|simsun|stsong|mingliu|source han serif|noto serif|song/.test(key)) {
+        return 'cjk-serif';
+      }
+      if (/sans|hei|yahei|dengxian|pingfang|jhenghei|source han sans|noto sans|arial unicode/.test(key)) {
+        return 'cjk-sans';
+      }
+      const genericCategory = getGenericFontCategory(family);
+      if (genericCategory === 'serif') return 'cjk-serif';
+      if (genericCategory === 'sans-serif' || genericCategory === 'cursive' || genericCategory === 'fantasy') {
+        return 'cjk-sans';
+      }
+      if (genericCategory === 'monospace') return 'monospace';
+    }
+    return 'cjk-sans';
+  }
+
+  function isLikelyCjkFontFamily(fontFamilyName) {
+    const key = normalizeFontFamilyKey(fontFamilyName);
+    if (!key || LATIN_DOMINANT_FONT_NAMES.has(key)) return false;
+    return (
+      /source han|noto (sans|serif) (cjk|sc)|songti|simsun|stsong|mingliu|pmingliu|yahei|dengxian|pingfang|hiragino sans gb|simhei|jhenghei|kaiti|fangsong|arial unicode|wenquanyi/.test(
+        key
+      ) || !!CJK_FONT_ALIAS_FALLBACKS[key]
+    );
+  }
+
+  function tryAvailableFontCandidates(candidates, fontContext) {
+    const seen = new Set();
+    for (const candidate of candidates || []) {
+      const key = normalizeFontFamilyKey(candidate);
+      if (!key || seen.has(key) || isGenericCssFontFamily(candidate)) continue;
+      seen.add(key);
+      if (isFontFamilyLikelyAvailable(candidate, fontContext)) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  function tryAvailableLatinFontCandidates(candidates, fontContext) {
+    const seen = new Set();
+    for (const candidate of candidates || []) {
+      const key = normalizeFontFamilyKey(candidate);
+      if (!key || seen.has(key) || isGenericCssFontFamily(candidate)) continue;
+      seen.add(key);
+      if (isLatinFontFamilyLikelyAvailable(candidate, fontContext)) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  function findBestCjkFontFallback(fontFamilyValue, fontContext, exportedFamilies) {
+    const category = inferCjkFontCategory(fontFamilyValue);
+    const families = exportedFamilies || collectExportFontFamilies(fontFamilyValue);
+
+    const explicitCjkFamilies = families.filter((family) => isLikelyCjkFontFamily(family));
+    const directMatch = tryAvailableFontCandidates(explicitCjkFamilies, fontContext);
+    if (directMatch) {
+      return { fontFace: directMatch, category, reason: 'cjk-direct' };
+    }
+
+    const aliasCandidates = [];
+    for (const family of explicitCjkFamilies) {
+      const aliases = CJK_FONT_ALIAS_FALLBACKS[normalizeFontFamilyKey(family)];
+      if (aliases) aliasCandidates.push(...aliases);
+    }
+    const aliasMatch = tryAvailableFontCandidates(aliasCandidates, fontContext);
+    if (aliasMatch) {
+      return { fontFace: aliasMatch, category, reason: 'cjk-alias-fallback' };
+    }
+
+    const categoryCandidates =
+      category === 'monospace'
+        ? GENERIC_FONT_FALLBACK_CANDIDATES.monospace
+        : CJK_FONT_FALLBACK_CANDIDATES[category] || CJK_FONT_FALLBACK_CANDIDATES['cjk-sans'];
+    const categoryMatch = tryAvailableFontCandidates(categoryCandidates, fontContext);
+    if (categoryMatch) {
+      return { fontFace: categoryMatch, category, reason: 'cjk-category-fallback' };
+    }
+
+    return { fontFace: null, category, reason: 'cjk-unresolved' };
   }
 
   function findBestGenericFontFallback(fontFamilyValue, fontContext) {
@@ -63333,15 +63891,93 @@
     return null;
   }
 
-  function resolveExportFontFace(fontFamilyValue, fontContext = null) {
+  function findBestLatinFontFallback(fontFamilyValue, fontContext) {
+    const rawFamilies = parseFontFamilyList(fontFamilyValue);
+    const genericFamilies = rawFamilies
+      .map((family) => getGenericFontCategory(family))
+      .filter(Boolean);
+
+    for (const genericCategory of genericFamilies) {
+      const candidates = LATIN_FONT_FALLBACK_CANDIDATES[genericCategory] || [];
+      const match = tryAvailableLatinFontCandidates(candidates, fontContext);
+      if (match) return match;
+    }
+
+    return null;
+  }
+
+  function resolveLatinExportFontFace(fontFamilyValue, fontContext = null) {
     const exportedFamilies = collectExportFontFamilies(fontFamilyValue);
-    if (exportedFamilies.length === 0) return null;
     for (const family of exportedFamilies) {
-      if (isFontFamilyLikelyAvailable(family, fontContext)) {
+      if (isLikelyCjkFontFamily(family)) continue;
+      if (isLatinFontFamilyLikelyAvailable(family, fontContext)) {
         return family;
       }
     }
-    return findBestGenericFontFallback(fontFamilyValue, fontContext) || exportedFamilies[0];
+    return findBestLatinFontFallback(fontFamilyValue, fontContext);
+  }
+
+  function resolveExportFontFace(fontFamilyValue, fontContext = null) {
+    const exportedFamilies = collectExportFontFamilies(fontFamilyValue);
+    const hasCjkText = contextContainsCjkText(fontContext);
+    const sample = hasCjkText ? getFontContextTextSample(fontContext) : '';
+
+    if (hasCjkText) {
+      const cjkDecision = findBestCjkFontFallback(fontFamilyValue, fontContext, exportedFamilies);
+      if (cjkDecision && cjkDecision.fontFace) {
+        recordFontExportDecision(fontContext, {
+          fontFamilyValue,
+          families: exportedFamilies,
+          resolved: cjkDecision.fontFace,
+          reason: cjkDecision.reason,
+          category: cjkDecision.category,
+          hasCjkText,
+          sample,
+        });
+        return cjkDecision.fontFace;
+      }
+    }
+
+    for (const family of exportedFamilies) {
+      if (isFontFamilyLikelyAvailable(family, fontContext)) {
+        recordFontExportDecision(fontContext, {
+          fontFamilyValue,
+          families: exportedFamilies,
+          resolved: family,
+          reason: 'direct',
+          category: null,
+          hasCjkText,
+          sample,
+        });
+        return family;
+      }
+    }
+
+    const genericFallback = findBestGenericFontFallback(fontFamilyValue, fontContext);
+    if (genericFallback) {
+      recordFontExportDecision(fontContext, {
+        fontFamilyValue,
+        families: exportedFamilies,
+        resolved: genericFallback,
+        reason: 'generic-fallback',
+        category: null,
+        hasCjkText,
+        sample,
+      });
+      return genericFallback;
+    }
+
+    const fallback = exportedFamilies[0] || null;
+    recordFontExportDecision(fontContext, {
+      fontFamilyValue,
+      families: exportedFamilies,
+      resolved: fallback,
+      reason: fallback ? 'unavailable-css-family' : 'none',
+      category: null,
+      hasCjkText,
+      sample,
+    });
+    return fallback;
   }
 
   function getNodeWindow(node) {
@@ -63395,7 +64031,13 @@
       ? Math.max(0, Math.min(1, colorObj.opacity))
       : 1;
     const textTransparency = (1 - colorOpacity) * 100;
+    const hasCjkText = contextContainsCjkText(fontContext);
     const exportFontFace = resolveExportFontFace(style.fontFamily, fontContext);
+    const exportEastAsiaFontFace = hasCjkText ? exportFontFace : null;
+    const exportLatinFontFace = exportEastAsiaFontFace
+      ? resolveLatinExportFontFace(style.fontFamily, fontContext)
+      : null;
+    const primaryFontFace = exportLatinFontFace || exportFontFace;
     const fontWeight = String(style.fontWeight || '').trim().toLowerCase();
     const fontStyle = String(style.fontStyle || '').trim().toLowerCase();
     const textDecoration = String(style.textDecoration || style.textDecorationLine || '').toLowerCase();
@@ -63403,7 +64045,11 @@
     return {
       ...(isEffectivelyHiddenText ? { hidden: true } : { color: colorObj.hex || '000000' }),
       ...(textTransparency > 0.1 ? { transparency: textTransparency } : {}),
-      ...(exportFontFace ? { fontFace: exportFontFace } : {}),
+      ...(primaryFontFace ? { fontFace: primaryFontFace } : {}),
+      ...(exportEastAsiaFontFace && exportEastAsiaFontFace !== primaryFontFace
+        ? { eaFontFace: exportEastAsiaFontFace, csFontFace: exportEastAsiaFontFace }
+        : {}),
+      ...(hasCjkText ? { lang: 'zh-CN' } : {}),
       fontSize: Math.floor(fontSizePx * 0.75 * scale),
       bold: fontWeight === 'bold' || parseInt(fontWeight, 10) >= 600,
       italic: fontStyle === 'italic' || fontStyle.startsWith('oblique'),
@@ -63959,9 +64605,9 @@
         }
         if (!colorToken || /^url\(/i.test(colorToken)) return;
         const parsedColor = parseColor(colorToken);
-        if (!parsedColor || !parsedColor.hex) return;
+        if (!parsedColor || (!parsedColor.hex && parsedColor.opacity > 0)) return;
         parsedStops.push({
-          color: '#' + parsedColor.hex,
+          color: '#' + (parsedColor.hex || '000000'),
           opacity: Number.isFinite(parsedColor.opacity) ? Math.max(0, Math.min(parsedColor.opacity, 1)) : 1,
           offsetRaw,
         });
@@ -64049,7 +64695,7 @@
         // Element
         const style = getNodeWindow(node).getComputedStyle(node);
         for (const family of collectExportFontFamilies(style.fontFamily)) {
-          families.add(family.toLowerCase());
+          families.add(normalizeFontFamilyKey(family));
         }
       }
       for (const child of node.childNodes) {
@@ -64141,8 +64787,9 @@
     if (!rules) return;
     for (const rule of Array.from(rules)) {
       if ((rule.constructor && rule.constructor.name === 'CSSFontFaceRule') || rule.type === 5) {
-        const familyName = resolveExportFontFace(rule.style.getPropertyValue('font-family'));
-        const familyKey = familyName ? familyName.toLowerCase() : '';
+        const familyNames = collectExportFontFamilies(rule.style.getPropertyValue('font-family'));
+        const familyName = familyNames.find((name) => usedFamilies.has(normalizeFontFamilyKey(name)));
+        const familyKey = familyName ? normalizeFontFamilyKey(familyName) : '';
         if (!familyKey || !usedFamilies.has(familyKey)) {
           continue;
         }
@@ -64192,6 +64839,84 @@
 
   // src/image-processor.js
 
+  function normalizeRuntimeResourceUrl(rawUrl, baseUrl = null) {
+    const value = String(rawUrl || '').trim();
+    if (!value || value.startsWith('#') || /^(data|blob|javascript|mailto|tel|about):/i.test(value)) {
+      return value;
+    }
+    try {
+      const fallbackBase =
+        baseUrl ||
+        (typeof document !== 'undefined' && document.baseURI) ||
+        (typeof window !== 'undefined' && window.location ? window.location.href : '');
+      const parsed = new URL(value, fallbackBase);
+      const appOwnedPath = /^\/(?:api\/image\/view\/|api\/image\/thumbnail\/|static\/|temp\/)/i.test(
+        parsed.pathname || ''
+      );
+      const localHost = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)$/i.test(parsed.hostname || '');
+      if (
+        appOwnedPath &&
+        localHost &&
+        typeof window !== 'undefined' &&
+        window.location &&
+        window.location.origin
+      ) {
+        return `${window.location.origin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+      }
+      return parsed.href;
+    } catch (e) {
+      return value;
+    }
+  }
+
+  function loadImageElementForExport(src, useCors = true) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      if (useCors && !String(src || '').startsWith('data:')) img.crossOrigin = 'Anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+  }
+
+  async function loadRuntimeImageForCanvas(src) {
+    const normalizedSrc = normalizeRuntimeResourceUrl(src);
+    if (!normalizedSrc) return null;
+
+    if (typeof fetch === 'function') {
+      try {
+        const response = await fetch(normalizedSrc, {
+          credentials: 'same-origin',
+          mode: 'cors',
+        });
+        if (response && response.ok) {
+          const blob = await response.blob();
+          if (blob && blob.size > 0) {
+            if (typeof createImageBitmap === 'function') {
+              const bitmap = await createImageBitmap(blob);
+              if (bitmap) return bitmap;
+            }
+
+            const objectUrl = URL.createObjectURL(blob);
+            try {
+              const img = await loadImageElementForExport(objectUrl, false);
+              if (img) return img;
+            } finally {
+              URL.revokeObjectURL(objectUrl);
+            }
+          }
+        }
+      } catch (_) {
+        // Fall back to Image loading below.
+      }
+    }
+
+    return (
+      (await loadImageElementForExport(normalizedSrc, true)) ||
+      (await loadImageElementForExport(normalizedSrc, false))
+    );
+  }
+
   async function getProcessedImage(
     src,
     targetW,
@@ -64199,18 +64924,19 @@
     radius,
     objectFit = 'fill',
     objectPosition = '50% 50%',
-    opacity = 1
+    opacity = 1,
+    cssMaskImage = null
   ) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = 'Anonymous';
+    try {
+      const imageSource = await loadRuntimeImageForCanvas(src);
+      if (!imageSource) return null;
 
-      img.onload = () => {
         const canvas = document.createElement('canvas');
         const scale = 2; // Double resolution
         canvas.width = targetW * scale;
         canvas.height = targetH * scale;
         const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
         ctx.scale(scale, scale);
 
         // Normalize radius
@@ -64255,25 +64981,27 @@
         ctx.globalCompositeOperation = 'source-in';
 
         // 3. Draw Image with Object Fit logic
-        const wRatio = targetW / img.width;
-        const hRatio = targetH / img.height;
+      const sourceW = imageSource.width || targetW || 1;
+      const sourceH = imageSource.height || targetH || 1;
+        const wRatio = targetW / sourceW;
+        const hRatio = targetH / sourceH;
         let renderW, renderH;
 
         if (objectFit === 'contain') {
           const fitScale = Math.min(wRatio, hRatio);
-          renderW = img.width * fitScale;
-          renderH = img.height * fitScale;
+        renderW = sourceW * fitScale;
+        renderH = sourceH * fitScale;
         } else if (objectFit === 'cover') {
           const coverScale = Math.max(wRatio, hRatio);
-          renderW = img.width * coverScale;
-          renderH = img.height * coverScale;
+        renderW = sourceW * coverScale;
+        renderH = sourceH * coverScale;
         } else if (objectFit === 'none') {
-          renderW = img.width;
-          renderH = img.height;
+        renderW = sourceW;
+        renderH = sourceH;
         } else if (objectFit === 'scale-down') {
           const scaleDown = Math.min(1, Math.min(wRatio, hRatio));
-          renderW = img.width * scaleDown;
-          renderH = img.height * scaleDown;
+        renderW = sourceW * scaleDown;
+        renderH = sourceH * scaleDown;
         } else {
           // 'fill' (default)
           renderW = targetW;
@@ -64302,15 +65030,17 @@
 
         const safeOpacity = Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 1;
         ctx.globalAlpha = safeOpacity;
-        ctx.drawImage(img, renderX, renderY, renderW, renderH);
+      ctx.drawImage(imageSource, renderX, renderY, renderW, renderH);
         ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
 
-        resolve(canvas.toDataURL('image/png'));
-      };
+      applyCssMaskToCanvas(ctx, cssMaskImage, targetW, targetH);
 
-      img.onerror = () => resolve(null);
-      img.src = src;
-    });
+      if (typeof imageSource.close === 'function') imageSource.close();
+      return canvas.toDataURL('image/png');
+    } catch (_) {
+      return null;
+    }
   }
 
   // src/index.js
@@ -64431,6 +65161,7 @@
     if (!PptxConstructor) throw new Error('PptxGenJS constructor not found.');
     const pptx = new PptxConstructor();
     pptx.layout = 'LAYOUT_16x9';
+    resetFontExportDebug();
     try {
       if (options && options.iconRules) {
         setIconRules(options.iconRules);
@@ -64562,6 +65293,10 @@
       throwIfExportAborted(options);
       // A. Scan DOM for used font families
       const usedFamilies = getUsedFontFamilies(processedRoots || []);
+      const fontDebug = getFontExportDebugStore();
+      if (fontDebug) {
+        fontDebug.usedFamilies = Array.from(usedFamilies);
+      }
 
       // B. Scan CSS for URLs matches
       const detectedFonts = await getAutoDetectedFonts(
@@ -64569,15 +65304,18 @@
         getDocumentsFromRoots(processedRoots || [])
       );
       throwIfExportAborted(options);
+      if (fontDebug) {
+        fontDebug.detectedFonts = detectedFonts.map((f) => ({ name: f.name, url: f.url }));
+      }
 
       // C. Merge (Avoid duplicates)
       const explicitNames = new Set(
         fontsToEmbed
-          .map((f) => String((f && f.name) || '').trim().toLowerCase())
+          .map((f) => normalizeFontFamilyKey(f && f.name))
           .filter(Boolean)
       );
       for (const autoFont of detectedFonts) {
-        const fontKey = String(autoFont.name || '').trim().toLowerCase();
+        const fontKey = normalizeFontFamilyKey(autoFont.name);
         if (!fontKey || explicitNames.has(fontKey)) {
           continue;
         }
@@ -64620,8 +65358,21 @@
           if (['woff', 'woff2', 'otf'].includes(ext)) type = ext;
 
           await embedder.addFont(fontCfg.name, buffer, type);
+          const fontDebug = getFontExportDebugStore();
+          if (fontDebug) {
+            fontDebug.embeddedFonts.push({ name: fontCfg.name, url: fontCfg.url, type, status: 'ok' });
+          }
         } catch (e) {
           if (isExportAbortError(e)) throw e;
+          const fontDebug = getFontExportDebugStore();
+          if (fontDebug) {
+            fontDebug.embeddedFonts.push({
+              name: fontCfg.name,
+              url: fontCfg.url,
+              status: 'failed',
+              error: e && e.message ? e.message : String(e),
+            });
+          }
           console.warn(`Failed to embed font: ${fontCfg.name} (${fontCfg.url})`, e);
         }
       }
@@ -64683,10 +65434,11 @@
     let domOrderCounter = 0;
 
     // Sync Traversal Function
-    function collect(node, parentZIndex, parentOpacity) {
+    function collect(node, parentZIndex, parentOpacity, zIndexScale = 1) {
       const order = domOrderCounter++;
 
       let currentZ = parentZIndex;
+      let childZIndexScale = zIndexScale;
       let currentOpacity = Number.isFinite(parentOpacity) ? Math.max(0, Math.min(1, parentOpacity)) : 1;
       let nodeStyle = null;
       const nodeType = node.nodeType;
@@ -64703,7 +65455,11 @@
           return;
         }
         if (nodeStyle.zIndex !== 'auto') {
-          currentZ = parseInt(nodeStyle.zIndex);
+          const parsedZIndex = parseInt(nodeStyle.zIndex, 10);
+          if (Number.isFinite(parsedZIndex)) {
+            currentZ = parentZIndex + parsedZIndex * zIndexScale;
+            childZIndexScale = zIndexScale / 1000;
+          }
         }
         const nodeOpacity = parseFloat(nodeStyle.opacity);
         if (Number.isFinite(nodeOpacity)) {
@@ -64739,7 +65495,7 @@
       // Recurse children synchronously
       const childNodes = node.childNodes;
       for (let i = 0; i < childNodes.length; i++) {
-        collect(childNodes[i], currentZ, currentOpacity);
+        collect(childNodes[i], currentZ, currentOpacity, childZIndexScale);
       }
     }
 
@@ -65508,6 +66264,14 @@
     return value < 0 ? 0 : value;
   }
 
+  const LOCAL_Z_LAYER_STEP = 0.0001;
+
+  function nextRenderableZIndex(zIndexRaw, steps = 1) {
+    const base = normalizeRenderableZIndex(zIndexRaw);
+    const safeSteps = Number.isFinite(steps) ? Math.max(1, steps) : 1;
+    return base + LOCAL_Z_LAYER_STEP * safeSteps;
+  }
+
   function decodePseudoContentValue(contentRaw) {
     let s = String(contentRaw || '').trim();
     if (!s || s === 'none' || s === 'normal' || s === '""' || s === "''") return '';
@@ -65611,7 +66375,7 @@
 
       const item = {
         type: 'image',
-        zIndex: zIndex + 1,
+        zIndex: nextRenderableZIndex(zIndex),
         domOrder: domOrder + 0.01 + index * 0.001,
         options: {
           x: config.offX + (rect.left - config.rootX) * PX_TO_INCH * config.scale,
@@ -66124,7 +66888,7 @@
 
         items.push({
           type: 'text',
-          zIndex: zIndex + 1,
+          zIndex: nextRenderableZIndex(zIndex),
           domOrder,
           textParts: listItems,
           options: {
@@ -66237,6 +67001,7 @@
 
       const objectFit = style.objectFit || 'fill'; // default CSS behavior is fill
       const objectPosition = style.objectPosition || '50% 50%';
+      const cssMaskImage = style.webkitMaskImage || style.maskImage || null;
 
       const item = {
         type: 'image',
@@ -66253,7 +67018,8 @@
           radii,
           objectFit,
           objectPosition,
-          safeOpacity
+          safeOpacity,
+          cssMaskImage
         );
         if (processed) item.options.data = processed;
         else item.skip = true;
@@ -66391,11 +67157,50 @@
     const isBgClipText = bgClip === 'text';
     const backgroundImageValue = String(style.backgroundImage || '');
     const hasGradient = !isBgClipText && backgroundImageValue.includes('linear-gradient');
+    const hasAnyGradientBackground =
+      !isBgClipText &&
+      /\b(?:linear|radial|conic|repeating-linear|repeating-radial)-gradient\s*\(/i.test(
+        backgroundImageValue
+      );
     const hasUrlBackgroundImage = !isBgClipText && /\burl\s*\(/i.test(backgroundImageValue);
     const hasLeafTextContent = !!(node.textContent && node.textContent.trim().length > 0);
     const hasLeafChildren = node.children && node.children.length > 0;
+    const gradientLayerCount = splitTopLevelCommaParts(backgroundImageValue).filter((part) =>
+      /\b(?:linear|radial|conic|repeating-linear|repeating-radial)-gradient\s*\(/i.test(part)
+    ).length;
+    const hasMaskImage =
+      String(style.webkitMaskImage || style.maskImage || '').trim() &&
+      String(style.webkitMaskImage || style.maskImage || '').trim() !== 'none';
+    const isComplexLeafGradientBackground =
+      hasAnyGradientBackground &&
+      !hasUrlBackgroundImage &&
+      !hasLeafTextContent &&
+      !hasLeafChildren &&
+      (gradientLayerCount > 1 ||
+        /\b(?:radial|conic|repeating-linear|repeating-radial)-gradient\s*\(/i.test(backgroundImageValue) ||
+        hasMaskImage);
     const isVisualLeafWithUrlBackground =
       hasUrlBackgroundImage && !hasLeafTextContent && !hasLeafChildren;
+
+    if (isComplexLeafGradientBackground) {
+      const item = {
+        type: 'image',
+        zIndex,
+        domOrder,
+        options: { x, y, w, h, rotate: rotation, data: null },
+      };
+
+      const job = async () => {
+        const rasterData = await elementToCanvasImage(node, widthPx, heightPx, {
+          padding: 0,
+          scale: 2,
+        });
+        if (rasterData) item.options.data = rasterData;
+        else item.skip = true;
+      };
+
+      return { items: [item], job, stopRecursion: true };
+    }
 
     if (isVisualLeafWithUrlBackground) {
       const item = {
@@ -66512,19 +67317,27 @@
       }
 
       if (bgData) {
-        items.push({
-          type: 'image',
-          zIndex,
-          domOrder,
-          options: {
-            data: bgData,
-            x: x - padIn,
-            y: y - padIn,
-            w: w + padIn * 2,
-            h: h + padIn * 2,
-            rotate: rotation,
-          },
-        });
+        const gradientOptions = {
+          data: bgData,
+          x: x - padIn,
+          y: y - padIn,
+          w: w + padIn * 2,
+          h: h + padIn * 2,
+          rotate: rotation,
+        };
+        const visualLeafGradient =
+          !textPayload && !hasLeafTextContent && !hasLeafChildren && !softEdge;
+        const clippedGradientOptions = visualLeafGradient
+          ? clipPptOptionsToOverflow(gradientOptions, node, config)
+          : gradientOptions;
+        if (clippedGradientOptions) {
+          items.push({
+            type: 'image',
+            zIndex,
+            domOrder,
+            options: clippedGradientOptions,
+          });
+        }
       }
 
       if (textPayload) {
@@ -66532,7 +67345,7 @@
           Math.floor(textPayload.text[0]?.options?.fontSize) || 12;
         items.push({
           type: 'text',
-          zIndex: zIndex + 1,
+          zIndex: nextRenderableZIndex(zIndex),
           domOrder,
           textParts: textPayload.text,
           options: {
@@ -66573,6 +67386,7 @@
       const finalAlpha = safeOpacity * bgColorObj.opacity;
       const transparency = (1 - finalAlpha) * 100;
       const useSolidFill = bgColorObj.hex && !isImageWrapper;
+      const splitUniformBorderOverlay = hasUniformBorder && hasLeafChildren && !textPayload;
 
       if (hasPartialBorderRadius && useSolidFill && !textPayload) {
         const shapeSvg = generateCustomShapeSVG(
@@ -66604,7 +67418,7 @@
           fill: useSolidFill
             ? { color: bgColorObj.hex, transparency: transparency }
             : { type: 'none' },
-          line: hasUniformBorder ? borderInfo.options : null,
+          line: hasUniformBorder && !splitUniformBorderOverlay ? borderInfo.options : null,
         };
 
         if (hasShadow) shapeOpts.shadow = getVisibleShadow(shadowStr, config.scale);
@@ -66664,13 +67478,33 @@
             textParts: textPayload.text,
             options: textOptions,
           });
-        } else if (!hasPartialBorderRadius) {
+        } else if (!hasPartialBorderRadius && (useSolidFill || hasShadow || !splitUniformBorderOverlay)) {
           items.push({
             type: 'shape',
             zIndex,
             domOrder,
             shapeType,
             options: shapeOpts,
+          });
+        }
+
+        if (splitUniformBorderOverlay) {
+          const borderOverlayOpts = {
+            x,
+            y,
+            w,
+            h,
+            rotate: rotation,
+            fill: { type: 'none' },
+            line: borderInfo.options,
+          };
+          if (shapeOpts.rectRadius) borderOverlayOpts.rectRadius = shapeOpts.rectRadius;
+          items.push({
+            type: 'shape',
+            zIndex: nextRenderableZIndex(zIndex),
+            domOrder,
+            shapeType,
+            options: borderOverlayOpts,
           });
         }
       }
@@ -66685,7 +67519,7 @@
         if (borderSvgData) {
           items.push({
             type: 'image',
-            zIndex: zIndex + 1,
+            zIndex: nextRenderableZIndex(zIndex),
             domOrder,
             options: { data: borderSvgData, x, y, w, h, rotate: rotation },
           });
@@ -66809,7 +67643,7 @@
   function createCompositeBorderItems(sides, x, y, w, h, scale, zIndex, domOrder) {
     const items = [];
     const pxToInch = 1 / 96;
-    const common = { zIndex: zIndex + 1, domOrder, shapeType: 'rect' };
+    const common = { zIndex: nextRenderableZIndex(zIndex), domOrder, shapeType: 'rect' };
 
     if (sides.top.width > 0)
       items.push({
@@ -66853,10 +67687,12 @@
     return items;
   }
 
-  var LANDPPT_DOM_TO_PPTX_PATCH_VERSION = '2026-04-05-font-resolve-v3';
+  var LANDPPT_DOM_TO_PPTX_PATCH_VERSION = '2026-04-25-layer-clip-v21';
   exports.exportToPptx = exportToPptx;
   exports.setIconRules = setIconRules;
   exports.getIconRules = getIconRules;
+  exports.__landpptResolveFontFace = resolveExportFontFace;
+  exports.__landpptResolveLatinFontFace = resolveLatinExportFontFace;
   exports.__landpptPatchVersion = LANDPPT_DOM_TO_PPTX_PATCH_VERSION;
 
 }));

@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Optional
 from ..api.models import ChatCompletionRequest, CompletionRequest, PPTGenerationRequest
 from ..ai import get_ai_provider, AIMessage, MessageRole
 from ..core.config import ai_config
+from .prompts.system_prompts import SystemPrompts
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ class AIService:
             prompt = request.prompt if isinstance(request.prompt, str) else request.prompt[0]
 
             # Create enhanced prompt for PPT generation
-            enhanced_prompt = self._create_ppt_prompt(prompt)
+            enhanced_prompt = SystemPrompts.with_text_cache_prefix(self._create_ppt_prompt(prompt))
 
             # Generate response using AI provider
             request_kwargs: Dict[str, Any] = {
@@ -173,7 +174,7 @@ class AIService:
             prompt = request.prompt if isinstance(request.prompt, str) else request.prompt[0]
 
             # Create enhanced prompt for general assistance
-            enhanced_prompt = self._create_general_prompt(prompt)
+            enhanced_prompt = SystemPrompts.with_text_cache_prefix(self._create_general_prompt(prompt))
 
             # Generate response using AI provider
             request_kwargs: Dict[str, Any] = {
@@ -194,7 +195,7 @@ class AIService:
 
     def _get_ppt_system_prompt(self) -> str:
         """Get system prompt for PPT generation"""
-        return """You are LandPPT AI, an expert presentation generation assistant. Your role is to help users create professional, engaging PowerPoint presentations.
+        return SystemPrompts.with_cache_prefix("""You are LandPPT AI, an expert presentation generation assistant. Your role is to help users create professional, engaging PowerPoint presentations.
 
 Key capabilities:
 1. Generate structured PPT outlines with clear sections
@@ -210,11 +211,11 @@ When helping with PPT creation:
 - Include practical tips for presentation delivery
 - Offer to generate specific slide content when requested
 
-Be helpful, professional, and focused on creating high-quality presentations."""
+Be helpful, professional, and focused on creating high-quality presentations.""")
 
     def _get_general_system_prompt(self) -> str:
         """Get system prompt for general assistance"""
-        return """You are LandPPT AI, a helpful assistant specialized in presentation generation. While you can provide general assistance, your primary expertise is in creating professional PowerPoint presentations.
+        return SystemPrompts.with_cache_prefix("""You are LandPPT AI, a helpful assistant specialized in presentation generation. While you can provide general assistance, your primary expertise is in creating professional PowerPoint presentations.
 
 When users ask non-PPT questions:
 - Provide helpful, accurate information
@@ -223,7 +224,7 @@ When users ask non-PPT questions:
 - Maintain a friendly, professional tone
 - Keep responses concise but informative
 
-Your goal is to be helpful while gently guiding users toward your presentation generation capabilities."""
+Your goal is to be helpful while gently guiding users toward your presentation generation capabilities.""")
 
     def _create_ppt_prompt(self, user_prompt: str) -> str:
         """Create enhanced prompt for PPT generation"""

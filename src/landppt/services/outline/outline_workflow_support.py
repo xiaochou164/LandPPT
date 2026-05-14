@@ -23,7 +23,19 @@ def build_validation_requirements(request: Any, outline_title: str) -> Dict[str,
             "max_pages": getattr(request, "max_pages", None),
             "fixed_pages": getattr(request, "fixed_pages", None),
         },
+        "include_transition_pages": bool(getattr(request, "include_transition_pages", False)),
     }
+
+
+def build_transition_page_requirement_text(request: Any) -> str:
+    if not bool(getattr(request, "include_transition_pages", False)):
+        return ""
+    return (
+        "\n\n【章节过渡页要求】\n"
+        "- 请在主要章节或逻辑模块之间加入 slide_type=\"transition\" 的章节过渡页。\n"
+        "- 过渡页计入总页数；固定页数或范围页数下不得额外超页。\n"
+        "- 过渡页只放章节标题、转场语或下一章节提示，不承载正文展开。"
+    )
 
 
 def build_file_info(request: Any, *, used_summeryanyfile: bool) -> Dict[str, Any]:
@@ -169,10 +181,21 @@ def create_outline_from_file_content(content: str, request: Any) -> Dict[str, An
                 }
             )
 
-        for index, section in enumerate(sections[:10], start=len(slides) + 1):
+        include_transition_pages = bool(getattr(request, "include_transition_pages", False))
+        max_sections = 10
+        for section_index, section in enumerate(sections[:max_sections], start=1):
+            if include_transition_pages and section_index > 1:
+                slides.append(
+                    {
+                        "page_number": len(slides) + 1,
+                        "title": section["title"],
+                        "content_points": ["章节过渡", "进入下一部分"],
+                        "slide_type": "transition",
+                    }
+                )
             slides.append(
                 {
-                    "page_number": index,
+                    "page_number": len(slides) + 1,
                     "title": section["title"],
                     "content_points": section["content"][:5] or ["Key point 1", "Key point 2"],
                     "slide_type": "content",
